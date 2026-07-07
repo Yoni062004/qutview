@@ -24,9 +24,11 @@ pip install -r requirements.txt
 
 # 3. Run the pipeline (in this order)
 python src/db/init_db.py
-python src/ingest/comtrade_imports.py      # add --sample to skip the API
-python src/ingest/worldbank_prices.py      # add --sample to skip the download
+python src/ingest/comtrade_imports.py           # add --sample to skip the API
+python src/ingest/worldbank_prices.py           # add --sample to skip the download
+python src/ingest/comtrade_mirror_monthly.py    # monthly mirror flows (needs API key)
 python src/features/risk_indicators.py
+python src/features/risk_indicators_monthly.py
 python src/models/forecast.py
 
 # 4. Launch the dashboard
@@ -36,14 +38,17 @@ streamlit run app/dashboard.py
 ## Project structure
 
 ```
-├── app/dashboard.py               # Streamlit dashboard (risk cards, origins, forecasts)
+├── app/dashboard.py               # Streamlit dashboard (risk cards, origins, forecasts, monthly monitor)
 ├── src/
 │   ├── common.py                  # shared constants, DB helpers, commodity registry
 │   ├── db/init_db.py              # SQLite star schema (dim/fact tables)
 │   ├── ingest/
-│   │   ├── comtrade_imports.py    # UAE import flows by origin (UN Comtrade)
-│   │   └── worldbank_prices.py    # monthly prices (World Bank Pink Sheet)
-│   ├── features/risk_indicators.py  # HHI, dependency, volatility → composite risk
+│   │   ├── comtrade_imports.py            # UAE annual import flows by origin (UN Comtrade)
+│   │   ├── comtrade_mirror_monthly.py     # monthly flows via mirror statistics (origin-reported)
+│   │   └── worldbank_prices.py            # monthly prices (World Bank Pink Sheet)
+│   ├── features/
+│   │   ├── risk_indicators.py             # annual HHI, dependency, volatility → composite risk
+│   │   └── risk_indicators_monthly.py     # rolling 12-month risk series from mirror flows
 │   └── models/forecast.py         # SARIMAX forecasts + backtested MAPE
 └── data/qutview.db                # generated — not committed
 ```
@@ -56,12 +61,25 @@ price volatility (stdev of monthly returns, capped at 10%). Forecasts are a
 SARIMAX(1,1,1)(1,0,1,12) baseline; the dashboard reports the model's real
 6-month holdout MAPE rather than claiming accuracy.
 
+**Monthly corridor monitor (v2):** the UAE stopped publishing monthly customs
+data to Comtrade after 2019, so monthly flows are reconstructed from *mirror
+statistics* — each top origin's own reported exports to the UAE (FOB,
+origin-reported). The same composite formula runs over a rolling 12-month
+window, giving a risk series that reacts to corridor shifts within months.
+Each commodity's mirror coverage is cross-checked against UAE-reported annual
+imports and shown in the dashboard (51%–137%; wheat is lowest because Russia
+stopped publishing trade data in 2022). Levels read higher than the annual
+model because only top corridors are tracked — the series is for direction
+and shift detection, not absolute comparison.
+
 ## Roadmap
 
 - [x] Phase 0–1: schema + ingestion (this repo)
 - [x] Phase 2: corridor risk indicators
 - [x] Phase 3: baseline forecasting with backtesting
 - [x] Phase 4a: Streamlit dashboard
+- [x] Registered UN Comtrade API key (authenticated endpoint, no preview rate caps)
+- [x] Monthly granularity via mirror statistics + rolling 12-month risk series
+- [ ] Import-dependency ratios (FAOSTAT production data)
 - [ ] Phase 4b: Power BI report over the same SQLite database
-- [ ] Registered UN Comtrade API key (full history, no 500-record cap)
-- [ ] AIS shipping-lane signals, satellite crop indices, monthly granularity
+- [ ] AIS shipping-lane signals, satellite crop indices
