@@ -50,14 +50,17 @@ latest_year = int(risks["year"].iloc[0])
 
 # ---------------- overview risk cards ----------------
 st.subheader(f"Corridor risk overview — {latest_year}")
-cols = st.columns(len(risks))
-for col, (_, row) in zip(cols, risks.iterrows()):
-    col.metric(
-        f"{risk_color(row.composite_risk)} {row['name']}",
-        f"{row.composite_risk:.0f} / 100",
-        f"top origin: {row.top_origin} ({row.top_origin_share*100:.0f}%)",
-        delta_color="off",
-    )
+PER_ROW = 4
+rows_list = list(risks.iterrows())
+for start in range(0, len(rows_list), PER_ROW):
+    cols = st.columns(PER_ROW)
+    for col, (_, row) in zip(cols, rows_list[start:start + PER_ROW]):
+        col.metric(
+            f"{risk_color(row.composite_risk)} {row['name']}",
+            f"{row.composite_risk:.0f} / 100",
+            f"top origin: {row.top_origin} ({row.top_origin_share*100:.0f}%)",
+            delta_color="off",
+        )
 
 st.divider()
 
