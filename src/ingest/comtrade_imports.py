@@ -18,9 +18,13 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common import COMMODITIES, UAE_REPORTER_CODE, YEARS, get_connection, record_data_source
+from common import (
+    COMMODITIES, UAE_REPORTER_CODE, YEARS,
+    get_comtrade_key, get_connection, record_data_source,
+)
 
 PREVIEW_URL = "https://comtradeapi.un.org/public/v1/preview/C/A/HS"
+AUTH_URL = "https://comtradeapi.un.org/data/v1/get/C/A/HS"  # registered-key endpoint
 PARTNER_REF_URL = "https://comtradeapi.un.org/files/v1/app/reference/partnerAreas.json"
 
 # Realistic origin mixes used only for sample mode / fallback.
@@ -59,7 +63,14 @@ def enrich_country_names(conn) -> int:
 
 
 def fetch_live(conn) -> int:
-    """Query Comtrade preview endpoint per commodity-year. Returns rows inserted."""
+    """Query Comtrade per commodity-year. Uses the authenticated endpoint when
+    COMTRADE_API_KEY is set (in .env or the environment); otherwise the free
+    preview endpoint (capped at 500 records/call, aggressive rate limits).
+    Returns rows inserted."""
+    key = get_comtrade_key()
+    url = AUTH_URL if key else PREVIEW_URL
+    headers = {"Ocp-Apim-Subscription-Key": key} if key else {}
+    print(f"  endpoint: {'authenticated (API key found)' if key else 'free preview (no API key)'}")
     inserted = 0
     for cid, meta in COMMODITIES.items():
         for year in YEARS:
@@ -71,7 +82,7 @@ def fetch_live(conn) -> int:
                 "maxRecords": 500,
             }
             try:
-                r = requests.get(PREVIEW_URL, params=params, timeout=30)
+                r = requests.get(url, params=params, headers=headers, timeout=30)
                 r.raise_for_status()
                 records = r.json().get("data", [])
             except Exception as exc:

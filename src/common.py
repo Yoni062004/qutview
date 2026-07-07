@@ -1,4 +1,5 @@
 """Shared constants and helpers for QUTVIEW."""
+import os
 import sqlite3
 from pathlib import Path
 
@@ -20,6 +21,24 @@ COMMODITIES = {
     "sugar": {"hs": "1701", "name": "Sugar", "wb_series": "Sugar, world", "unit": "USD/kg"},
     "poultry": {"hs": "0207", "name": "Poultry", "wb_series": "Chicken", "unit": "USD/kg"},
 }
+
+
+def get_comtrade_key() -> str | None:
+    """Read COMTRADE_API_KEY from the environment or a .env file in the
+    project root. Returns None when no key is configured — callers fall
+    back to the free preview endpoint."""
+    key = os.environ.get("COMTRADE_API_KEY")
+    if key:
+        return key
+    env_file = PROJECT_ROOT / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8-sig").splitlines():
+            line = line.strip()
+            if line.startswith("COMTRADE_API_KEY") and "=" in line:
+                value = line.partition("=")[2].strip().strip("'\"")
+                if value and "paste" not in value.lower():
+                    return value
+    return None
 
 
 def get_connection() -> sqlite3.Connection:
