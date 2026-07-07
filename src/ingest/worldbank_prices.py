@@ -1,0 +1,152 @@
+"""Ingest monthly global commodity prices from the World Bank "Pink Sheet".
+
+Downloads the CMO-Historical-Data-Monthly.xlsx file and extracts the five
+QUTVIEW commodity series. The World Bank moves this URL occasionally; the
+script tries known locations and otherwise falls back to sample data so the
+pipeline always completes.
+
+Run:  python src/ingest/worldbank_prices.py            (live, with fallback)
+      python src/ingest/worldbank_prices.py --sample   (force sample data)
+
+Manual fallback: download "Monthly prices" from
+https://www.worldbank.org/en/research/commodity-markets and save it as
+data/raw/CMO-Historical-Data-Monthly.xlsx, then rerun this script.
+"""
+import io
+import math
+import random
+import sys
+from pathlib import Path
+
+import pandas as pd
+import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from common import COMMODITIES, DATA_DIR, YEARS, get_connection, record_data_source
+
+CANDIDATE_URLS = [
+    # The doc id in these URLs changes with each monthly release; try a few.
+    "https://thedocs.worldbank.org/en/doc/18675f1d1639c7a34d463f59263ba0a2-0050012025/related/CMO-Historical-Data-Monthly.xlsx",
+    "https://thedocs.worldbank.org/en/doc/5d903e848db1d1b83e0ec8f744e55570-0350012021/related/CMO-Historical-Data-Monthly.xlsx",
+]
+LOCAL_COPY = DATA_DIR / "raw" / "CMO-Historical-Data-Monthly.xlsx"
+
+# Rough current price levels used only for sample mode / fallback.
+SAMPLE_BASE_PRICE = {"wheat": 270.0, "rice": 550.0, "palm_oil": 950.0, "sugar": 0.45, "poultry": 1.60}
+
+
+def _norm(label) -> str:
+    """Normalise a Pink Sheet column label: drop footnote asterisks,
+    collapse case and stray whitespace ('Rice, Thai 5%  ' == 'rice, thai 5%')."""
+    return str(label).replace("**", "").replace("*", "").strip().lower()
+
+
+def parse_pink_sheet(content: bytes, conn) -> int:
+    """The Pink Sheet 'Monthly Prices' sheet has a multi-row header: commodity
+    names in one row, units below it, then data rows keyed like '2024M03'.
+    Locate the name row by searching for 'Wheat, US HRW', then map each of our
+    commodities to its column index."""
+    raw = pd.read_excel(io.BytesIO(content), sheet_name="Monthly Prices", header=None)
+
+    targets = {_norm(meta["wb_series"]): cid for cid, meta in COMMODITIES.items()}
+    header_row, col_for = None, {}
+    for i in range(min(12, len(raw))):
+        labels = {j: _norm(v) for j, v in raw.iloc[i].items()}
+        if "wheat, us hrw" in labels.values():
+            header_row = i
+            col_for = {j: targets[lbl] for j, lbl in labels.items() if lbl in targets}
+            break
+    if header_row is None:
+        raise ValueError("Could not locate the commodity-name header row in Pink Sheet")
+    missing = set(COMMODITIES) - set(col_for.values())
+    if missing:
+        raise ValueError(f"Pink Sheet columns not found for: {sorted(missing)}")
+
+    inserted = 0
+    for _, row in raw.iloc[header_row + 1:].iterrows():
+        period_raw = str(row.iloc[0]).strip()  # format like '2024M03'
+        if len(period_raw) != 7 or "M" not in period_raw:
+            continue
+        year, month = period_raw.split("M")
+        if not year.isdigit() or int(year) < YEARS[0]:
+            continue
+        for col, cid in col_for.items():
+            try:
+                price = float(row.iloc[col])
+            except (TypeError, ValueError):
+                continue
+            if math.isnan(price):
+                continue
+            conn.execute(
+                "INSERT OR REPLACE INTO fact_prices (period, commodity_id, price) VALUES (?,?,?)",
+                (f"{year}-{month}", cid, price),
+            )
+            inserted += 1
+    return inserted
+
+
+def fetch_live(conn) -> int:
+    if LOCAL_COPY.exists():
+        print(f"Using local copy: {LOCAL_COPY}")
+        return parse_pink_sheet(LOCAL_COPY.read_bytes(), conn)
+    for url in CANDIDATE_URLS:
+        try:
+            print(f"Trying {url[:80]}...")
+            r = requests.get(url, timeout=60)
+            r.raise_for_status()
+            return parse_pink_sheet(r.content, conn)
+        except Exception as exc:
+            print(f"  failed: {exc}")
+    return 0
+
+
+def load_sample(conn) -> int:
+    """Synthetic monthly prices: trend + annual seasonality + noise, plus a
+    2022 supply-shock bump so charts and volatility metrics look realistic."""
+    rng = random.Random(7)
+    inserted = 0
+    for cid, base in SAMPLE_BASE_PRICE.items():
+        price = base * 0.8
+        for year in YEARS:
+            for month in range(1, 13):
+                if year == 2025 and month > 12:
+                    break
+                t = (year - YEARS[0]) * 12 + month
+                seasonal = 1 + 0.04 * math.sin(2 * math.pi * month / 12)
+                shock = 1.35 if (year == 2022 and 3 <= month <= 9) else 1.0
+                drift = 1 + 0.003 * t
+                price = base * 0.8 * drift * seasonal * shock * rng.uniform(0.97, 1.03)
+                conn.execute(
+                    "INSERT OR REPLACE INTO fact_prices (period, commodity_id, price) VALUES (?,?,?)",
+                    (f"{year}-{month:02d}", cid, round(price, 4)),
+                )
+                inserted += 1
+    return inserted
+
+
+def main() -> None:
+    force_sample = "--sample" in sys.argv
+    conn = get_connection()
+    conn.execute("DELETE FROM fact_prices")
+
+    inserted = 0
+    if not force_sample:
+        inserted = fetch_live(conn)
+
+    if inserted == 0:
+        if not force_sample:
+            print("Could not fetch Pink Sheet — falling back to sample prices.")
+        inserted = load_sample(conn)
+        record_data_source(conn, "prices", "sample")
+        print(f"Loaded {inserted} sample price points.")
+    else:
+        record_data_source(conn, "prices", "live")
+        print(f"Loaded {inserted} live price points from the World Bank Pink Sheet.")
+
+    conn.commit()
+    conn.close()
+
+
+if __name__ == "__main__":
+    main()
