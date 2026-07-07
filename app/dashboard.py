@@ -100,7 +100,7 @@ with left:
         height=320, margin=dict(l=10, r=10, t=40, b=10),
         yaxis=dict(autorange="reversed"),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 with right:
     hist = load(
@@ -127,7 +127,7 @@ with right:
         title=f"{COMMODITIES[cid]['name']} — global price ({COMMODITIES[cid]['unit']}) with 6-month forecast",
         height=420, margin=dict(l=10, r=10, t=40, b=10),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     trend = load(
         "SELECT year, composite_risk, hhi FROM risk_scores WHERE commodity_id = ? ORDER BY year",
@@ -140,7 +140,7 @@ with right:
         title="Composite corridor risk over time (0–100)",
         height=260, margin=dict(l=10, r=10, t=40, b=10),
     )
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig2, width="stretch")
 
 st.caption(
     "Risk score = 50% origin concentration (HHI) + 30% top-origin dependency "
