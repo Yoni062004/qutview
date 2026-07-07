@@ -2,8 +2,9 @@
 
 Downloads the CMO-Historical-Data-Monthly.xlsx file and extracts the five
 QUTVIEW commodity series. The World Bank moves this URL occasionally; the
-script tries known locations and otherwise falls back to sample data so the
-pipeline always completes.
+script tries known locations. On failure it keeps any existing data
+untouched, falling back to sample data only when the table is empty so a
+fresh clone still demos end-to-end.
 
 Run:  python src/ingest/worldbank_prices.py            (live, with fallback)
       python src/ingest/worldbank_prices.py --sample   (force sample data)
@@ -42,11 +43,12 @@ def _norm(label) -> str:
     return str(label).replace("**", "").replace("*", "").strip().lower()
 
 
-def parse_pink_sheet(content: bytes, conn) -> int:
+def parse_pink_sheet(content: bytes) -> list[tuple]:
     """The Pink Sheet 'Monthly Prices' sheet has a multi-row header: commodity
     names in one row, units below it, then data rows keyed like '2024M03'.
     Locate the name row by searching for 'Wheat, US HRW', then map each of our
-    commodities to its column index."""
+    commodities to its column index. Returns (period, commodity_id, price)
+    tuples — no database writes here, so a bad file can't corrupt anything."""
     raw = pd.read_excel(io.BytesIO(content), sheet_name="Monthly Prices", header=None)
 
     targets = {_norm(meta["wb_series"]): cid for cid, meta in COMMODITIES.items()}
@@ -63,7 +65,7 @@ def parse_pink_sheet(content: bytes, conn) -> int:
     if missing:
         raise ValueError(f"Pink Sheet columns not found for: {sorted(missing)}")
 
-    inserted = 0
+    rows = []
     for _, row in raw.iloc[header_row + 1:].iterrows():
         period_raw = str(row.iloc[0]).strip()  # format like '2024M03'
         if len(period_raw) != 7 or "M" not in period_raw:
@@ -78,27 +80,32 @@ def parse_pink_sheet(content: bytes, conn) -> int:
                 continue
             if math.isnan(price):
                 continue
-            conn.execute(
-                "INSERT OR REPLACE INTO fact_prices (period, commodity_id, price) VALUES (?,?,?)",
-                (f"{year}-{month}", cid, price),
-            )
-            inserted += 1
-    return inserted
+            rows.append((f"{year}-{month}", cid, price))
+    return rows
 
 
-def fetch_live(conn) -> int:
+def fetch_live() -> list[tuple]:
     if LOCAL_COPY.exists():
         print(f"Using local copy: {LOCAL_COPY}")
-        return parse_pink_sheet(LOCAL_COPY.read_bytes(), conn)
+        return parse_pink_sheet(LOCAL_COPY.read_bytes())
     for url in CANDIDATE_URLS:
         try:
             print(f"Trying {url[:80]}...")
             r = requests.get(url, timeout=60)
             r.raise_for_status()
-            return parse_pink_sheet(r.content, conn)
+            return parse_pink_sheet(r.content)
         except Exception as exc:
             print(f"  failed: {exc}")
-    return 0
+    return []
+
+
+def store_rows(conn, rows) -> int:
+    conn.execute("DELETE FROM fact_prices")
+    conn.executemany(
+        "INSERT OR REPLACE INTO fact_prices (period, commodity_id, price) VALUES (?,?,?)",
+        rows,
+    )
+    return len(rows)
 
 
 def load_sample(conn) -> int:
@@ -128,21 +135,38 @@ def load_sample(conn) -> int:
 def main() -> None:
     force_sample = "--sample" in sys.argv
     conn = get_connection()
-    conn.execute("DELETE FROM fact_prices")
 
-    inserted = 0
-    if not force_sample:
-        inserted = fetch_live(conn)
-
-    if inserted == 0:
-        if not force_sample:
-            print("Could not fetch Pink Sheet — falling back to sample prices.")
+    if force_sample:
+        conn.execute("DELETE FROM fact_prices")
         inserted = load_sample(conn)
         record_data_source(conn, "prices", "sample")
         print(f"Loaded {inserted} sample price points.")
-    else:
+        conn.commit()
+        conn.close()
+        return
+
+    try:
+        rows = fetch_live()
+    except Exception as exc:
+        print(f"Pink Sheet parse failed ({exc}).")
+        rows = []
+
+    if rows:
+        inserted = store_rows(conn, rows)
         record_data_source(conn, "prices", "live")
         print(f"Loaded {inserted} live price points from the World Bank Pink Sheet.")
+    else:
+        # Never replace existing data with synthetic data: fall back to
+        # sample prices only when the table is empty (fresh clone / demo).
+        existing = conn.execute("SELECT count(*) FROM fact_prices").fetchone()[0]
+        if existing:
+            print(f"Could not fetch Pink Sheet — keeping {existing} existing price points untouched.")
+            conn.close()
+            sys.exit(1)
+        print("Could not fetch Pink Sheet — falling back to sample prices.")
+        inserted = load_sample(conn)
+        record_data_source(conn, "prices", "sample")
+        print(f"Loaded {inserted} sample price points.")
 
     conn.commit()
     conn.close()
