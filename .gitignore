@@ -4,5 +4,6 @@ __pycache__/
 *.pyc
 data/*.db
 data/raw/
+data/powerbi/
 .streamlit/secrets.toml
 .claude/

@@ -35,6 +35,9 @@ python src/models/forecast.py
 
 # 4. Launch the dashboard
 streamlit run app/dashboard.py
+
+# 5. (Optional) Export CSVs for the Power BI report
+python scripts/export_powerbi.py     # then follow docs/powerbi_guide.md
 ```
 
 ## Project structure
