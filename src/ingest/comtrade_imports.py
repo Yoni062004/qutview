@@ -104,6 +104,7 @@ def fetch_live(conn) -> list[tuple]:
                 "cmdCode": meta["hs"],
                 "flowCode": "M",
                 "maxRecords": 500,
+                "includeDesc": "true",  # auth endpoint omits partner names without this
             }
             try:
                 records = fetch_one(url, params, headers)
