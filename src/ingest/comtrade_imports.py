@@ -1,9 +1,12 @@
 """Ingest UAE food import flows (by origin country) from UN Comtrade.
 
-Uses the free public preview endpoint (no API key, capped at 500 records
-per call, so we query one commodity-year at a time). If the API is
-unreachable or returns nothing, falls back to realistic sample data so
-the rest of the pipeline always works.
+Uses the authenticated endpoint when COMTRADE_API_KEY is configured,
+otherwise the free public preview endpoint (capped at 500 records per
+call, so we query one commodity-year at a time, with retry/backoff on
+rate limits). If the API is unreachable or returns nothing, falls back
+to realistic sample data so the rest of the pipeline always works. A
+live fetch is staged in memory and only replaces existing data once it
+succeeds, so a failed run never leaves the database half-updated.
 
 Run:  python src/ingest/comtrade_imports.py               (live, with fallback)
       python src/ingest/comtrade_imports.py --sample      (force sample data)
@@ -62,16 +65,37 @@ def enrich_country_names(conn) -> int:
     return updated
 
 
-def fetch_live(conn) -> int:
+MAX_RETRIES = 4
+
+
+def fetch_one(url, params, headers):
+    """GET with retry/backoff on 429 (rate limit) and 5xx. Returns the parsed
+    record list, or raises on a non-retryable failure or exhausted retries."""
+    delay = 2
+    for attempt in range(1, MAX_RETRIES + 1):
+        r = requests.get(url, params=params, headers=headers, timeout=30)
+        if r.status_code == 429 or r.status_code >= 500:
+            if attempt == MAX_RETRIES:
+                r.raise_for_status()
+            time.sleep(delay)
+            delay *= 2
+            continue
+        r.raise_for_status()
+        return r.json().get("data", [])
+    return []
+
+
+def fetch_live(conn) -> list[tuple]:
     """Query Comtrade per commodity-year. Uses the authenticated endpoint when
     COMTRADE_API_KEY is set (in .env or the environment); otherwise the free
     preview endpoint (capped at 500 records/call, aggressive rate limits).
-    Returns rows inserted."""
+    Returns the list of fetched rows — caller decides whether/how to store
+    them, so a partial failure here never touches the existing database."""
     key = get_comtrade_key()
     url = AUTH_URL if key else PREVIEW_URL
     headers = {"Ocp-Apim-Subscription-Key": key} if key else {}
     print(f"  endpoint: {'authenticated (API key found)' if key else 'free preview (no API key)'}")
-    inserted = 0
+    rows = []
     for cid, meta in COMMODITIES.items():
         for year in YEARS:
             params = {
@@ -82,30 +106,37 @@ def fetch_live(conn) -> int:
                 "maxRecords": 500,
             }
             try:
-                r = requests.get(url, params=params, headers=headers, timeout=30)
-                r.raise_for_status()
-                records = r.json().get("data", [])
+                records = fetch_one(url, params, headers)
             except Exception as exc:
-                print(f"  {cid} {year}: request failed ({exc})")
-                continue
+                print(f"  {cid} {year}: request failed after retries ({exc}) — aborting live fetch")
+                raise
             for rec in records:
                 partner = rec.get("partnerCode")
                 if not partner:  # partnerCode 0 = 'World' aggregate — skip
                     continue
-                conn.execute(
-                    "INSERT OR IGNORE INTO dim_country (country_code, name) VALUES (?,?)",
-                    (partner, rec.get("partnerDesc") or str(partner)),
-                )
-                conn.execute(
-                    "INSERT OR REPLACE INTO fact_imports "
-                    "(year, commodity_id, origin_code, trade_value_usd, net_weight_kg) "
-                    "VALUES (?,?,?,?,?)",
-                    (year, cid, partner, rec.get("primaryValue"), rec.get("netWgt")),
-                )
-                inserted += 1
+                rows.append((
+                    year, cid, partner, rec.get("partnerDesc") or str(partner),
+                    rec.get("primaryValue"), rec.get("netWgt"),
+                ))
             print(f"  {cid} {year}: {len(records)} records")
             time.sleep(1)  # stay polite on the free endpoint
-    return inserted
+    return rows
+
+
+def store_rows(conn, rows) -> int:
+    conn.execute("DELETE FROM fact_imports")
+    for year, cid, partner, name, value, weight in rows:
+        conn.execute(
+            "INSERT OR IGNORE INTO dim_country (country_code, name) VALUES (?,?)",
+            (partner, name),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO fact_imports "
+            "(year, commodity_id, origin_code, trade_value_usd, net_weight_kg) "
+            "VALUES (?,?,?,?,?)",
+            (year, cid, partner, value, weight),
+        )
+    return len(rows)
 
 
 def load_sample(conn) -> int:
@@ -150,24 +181,35 @@ def main() -> None:
         print(f"Refreshed {updated} country names.")
         return
 
-    conn.execute("DELETE FROM fact_imports")
-
-    inserted = 0
-    if not force_sample:
-        print("Fetching UAE import flows from UN Comtrade (free preview endpoint)...")
-        inserted = fetch_live(conn)
-
-    if inserted == 0:
-        if not force_sample:
-            print("Live API returned no data — falling back to sample data.")
+    if force_sample:
+        conn.execute("DELETE FROM fact_imports")
         inserted = load_sample(conn)
         record_data_source(conn, "imports", "sample")
         print(f"Loaded {inserted} sample import rows.")
-    else:
+        conn.commit()
+        conn.close()
+        return
+
+    print("Fetching UAE import flows from UN Comtrade...")
+    try:
+        rows = fetch_live(conn)
+    except Exception as exc:
+        print(f"Live fetch aborted ({exc}) — existing data left untouched.")
+        conn.close()
+        sys.exit(1)
+
+    if rows:
+        inserted = store_rows(conn, rows)
         named = enrich_country_names(conn)
         record_data_source(conn, "imports", "live")
         print(f"Loaded {inserted} live import rows from UN Comtrade "
               f"({named} country names resolved).")
+    else:
+        print("Live API returned no data — falling back to sample data.")
+        conn.execute("DELETE FROM fact_imports")
+        inserted = load_sample(conn)
+        record_data_source(conn, "imports", "sample")
+        print(f"Loaded {inserted} sample import rows.")
 
     conn.commit()
     conn.close()
