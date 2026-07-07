@@ -98,6 +98,28 @@ CREATE TABLE IF NOT EXISTS risk_scores_monthly (
     PRIMARY KEY (period, commodity_id)
 );
 
+-- UAE domestic production (FAOSTAT QCL, tonnes). Commodities the UAE does
+-- not produce simply have no rows; the dependency computation treats
+-- missing as zero production.
+CREATE TABLE IF NOT EXISTS fact_production (
+    year              INTEGER NOT NULL,
+    commodity_id      TEXT NOT NULL REFERENCES dim_commodity(commodity_id),
+    production_tonnes REAL,
+    PRIMARY KEY (year, commodity_id)
+);
+
+-- Import dependency by weight: imports / (imports + domestic production).
+-- An approximation — re-exports are not netted out and HS headings do not
+-- map 1:1 to FAO items (e.g. frozen-only beef imports vs all cattle meat).
+CREATE TABLE IF NOT EXISTS dependency_ratios (
+    year            INTEGER NOT NULL,
+    commodity_id    TEXT NOT NULL REFERENCES dim_commodity(commodity_id),
+    import_kt       REAL,
+    production_kt   REAL,
+    dependency_pct  REAL,
+    PRIMARY KEY (year, commodity_id)
+);
+
 -- How much of the UAE-reported annual import value the mirror origins cover,
 -- measured on the latest year both sources report. Shown in the dashboard so
 -- partial corridors (e.g. wheat: Russia stopped publishing in 2022) are

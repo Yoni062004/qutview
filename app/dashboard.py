@@ -77,6 +77,25 @@ left, right = st.columns([1, 2])
 with left:
     st.markdown(f"### {COMMODITIES[cid]['name']}")
     st.metric("Composite risk", f"{detail.composite_risk:.1f} / 100")
+    dep = load(
+        """SELECT dependency_pct, import_kt, production_kt FROM dependency_ratios
+           WHERE commodity_id = ? AND year = (SELECT max(year) FROM dependency_ratios)""",
+        (cid,),
+    )
+    if not dep.empty and pd.notna(dep.dependency_pct[0]):
+        dep_pct = float(dep.dependency_pct[0])
+        st.metric(
+            "Import dependency (by weight)",
+            f"{dep_pct:.0f}%",
+            f"domestic production: {dep.production_kt[0]:.0f} kt vs {dep.import_kt[0]:.0f} kt imported",
+            delta_color="off",
+        )
+        st.metric(
+            "Exposure-adjusted risk",
+            f"{detail.composite_risk * dep_pct / 100:.1f} / 100",
+            "corridor risk × import dependency",
+            delta_color="off",
+        )
     st.metric("Origin concentration (HHI)", f"{detail.hhi:.2f}")
     st.metric("Distinct origin countries", int(detail.n_origins))
     bt = load("SELECT mape_pct, horizon_months FROM backtest_metrics WHERE commodity_id = ?", (cid,))
@@ -233,5 +252,7 @@ else:
 
 st.caption(
     "Risk score = 50% origin concentration (HHI) + 30% top-origin dependency "
-    "+ 20% price volatility. Forecasts: SARIMAX baseline with backtested error shown honestly."
+    "+ 20% price volatility. Forecasts: SARIMAX baseline with backtested error shown honestly. "
+    "Import dependency = imports / (imports + UAE production) by weight (FAOSTAT); "
+    "re-exports are not netted out and HS headings map only approximately to FAO items."
 )
