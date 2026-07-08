@@ -22,7 +22,10 @@ python -m venv .venv
 # 2. Install dependencies
 pip install -r requirements.txt
 
-# 3. Run the pipeline (in this order)
+# 3. Run the pipeline — one command does all of it, including the
+#    Power BI CSV export (or run the steps individually, in this order)
+python scripts/refresh_all.py        # or double-click refresh_all.bat
+
 python src/db/init_db.py
 python src/ingest/comtrade_imports.py           # add --sample to skip the API
 python src/ingest/worldbank_prices.py           # add --sample to skip the download
@@ -39,6 +42,11 @@ streamlit run app/dashboard.py
 # 5. (Optional) Export CSVs for the Power BI report
 python scripts/export_powerbi.py     # then follow docs/powerbi_guide.md
 ```
+
+Refreshing later: `python scripts/refresh_all.py` re-pulls all sources and
+re-exports the Power BI CSVs; then open [docs/QUTVIEW.pbix](docs/QUTVIEW.pbix)
+and hit **Home → Refresh** — the report reads the CSVs live, so that one click
+is the only manual step (Power BI Desktop has no unattended refresh).
 
 ## Project structure
 
