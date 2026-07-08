@@ -87,6 +87,28 @@ dependency) alongside the raw corridor score. Approximations disclosed:
 re-exports are not netted out, and HS import headings map only roughly to
 FAO production items.
 
+## Power BI report
+
+A three-page Power BI report ([docs/QUTVIEW.pbix](docs/QUTVIEW.pbix)) built over the same
+data as the Streamlit dashboard, via `scripts/export_powerbi.py` CSVs. Same CVD-safe
+palette ([docs/qutview_theme.json](docs/qutview_theme.json)); build steps in
+[docs/powerbi_guide.md](docs/powerbi_guide.md).
+
+**Risk Overview** — corridor risk ranked, with import-dependency and exposure-adjusted
+risk, and a data-freshness card:
+
+![Risk Overview](docs/screenshots/1_risk_overview.png)
+
+**Monthly Corridor Monitor** — origin-level monthly flows (mirror statistics) and the
+rolling 12-month composite risk series, with the mirror-coverage caveat on-canvas:
+
+![Monthly Corridor Monitor](docs/screenshots/2_monthly_corridor_monitor.png)
+
+**Prices & Forecasts** — sliced per commodity (wheat shown: note the 2022 supply-shock
+spike), 6-month SARIMAX forecast with 90% interval and the backtested MAPE:
+
+![Prices & Forecasts](docs/screenshots/3_prices_forecasts.png)
+
 ## Roadmap
 
 - [x] Phase 0–1: schema + ingestion (this repo)
@@ -96,5 +118,5 @@ FAO production items.
 - [x] Registered UN Comtrade API key (authenticated endpoint, no preview rate caps)
 - [x] Monthly granularity via mirror statistics + rolling 12-month risk series
 - [x] Import-dependency ratios (FAOSTAT production data) + exposure-adjusted risk
-- [ ] Phase 4b: Power BI report over the same SQLite database
+- [x] Phase 4b: Power BI report over the same SQLite database
 - [ ] AIS shipping-lane signals, satellite crop indices

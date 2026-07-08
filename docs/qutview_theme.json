@@ -1,0 +1,7 @@
+{
+    "name": "QUTVIEW",
+    "dataColors": ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#56B4E9", "#E69F00"],
+    "bad": "#D55E00",
+    "neutral": "#E69F00",
+    "good": "#009E73"
+}
