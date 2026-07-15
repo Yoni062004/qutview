@@ -1,10 +1,14 @@
 """Ingest monthly global commodity prices from the World Bank "Pink Sheet".
 
 Downloads the CMO-Historical-Data-Monthly.xlsx file and extracts the five
-QUTVIEW commodity series. The World Bank moves this URL occasionally; the
-script tries known locations. On failure it keeps any existing data
-untouched, falling back to sample data only when the table is empty so a
-fresh clone still demos end-to-end.
+QUTVIEW commodity series. The download URL carries a doc id that rotates
+with each monthly release, so the current link is discovered live from the
+commodity-markets page first, with known past URLs as backup. A manually
+downloaded local copy is the last resort only — an old local file must
+never shadow a fresher release (that silently froze prices at 2025-12
+once). On total failure it keeps any existing data untouched, falling back
+to sample data only when the table is empty so a fresh clone still demos
+end-to-end.
 
 Run:  python src/ingest/worldbank_prices.py            (live, with fallback)
       python src/ingest/worldbank_prices.py --sample   (force sample data)
@@ -16,7 +20,9 @@ data/raw/CMO-Historical-Data-Monthly.xlsx, then rerun this script.
 import io
 import math
 import random
+import re
 import sys
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -26,12 +32,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common import COMMODITIES, DATA_DIR, YEARS, get_connection, record_data_source
 
+PAGE_URL = "https://www.worldbank.org/en/research/commodity-markets"
 CANDIDATE_URLS = [
-    # The doc id in these URLs changes with each monthly release; try a few.
+    # Known past releases, used only if discovery from PAGE_URL fails.
     "https://thedocs.worldbank.org/en/doc/18675f1d1639c7a34d463f59263ba0a2-0050012025/related/CMO-Historical-Data-Monthly.xlsx",
     "https://thedocs.worldbank.org/en/doc/5d903e848db1d1b83e0ec8f744e55570-0350012021/related/CMO-Historical-Data-Monthly.xlsx",
 ]
 LOCAL_COPY = DATA_DIR / "raw" / "CMO-Historical-Data-Monthly.xlsx"
+STALE_MONTHS = 4  # warn when the freshest loaded month lags today by more
+
+
+def discover_urls() -> list[str]:
+    """Scrape the commodity-markets page for the current monthly-data link,
+    so the ingest keeps working as the World Bank rotates release doc ids."""
+    try:
+        r = requests.get(PAGE_URL, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        found = re.findall(
+            r"https://thedocs\.worldbank\.org/[^\"'\s]+CMO-Historical-Data-Monthly\.xlsx",
+            r.text,
+        )
+        return list(dict.fromkeys(found))  # de-dupe, keep order
+    except Exception as exc:
+        print(f"Could not discover current Pink Sheet URL ({exc}) — trying known URLs.")
+        return []
 
 # Rough current price levels used only for sample mode / fallback.
 SAMPLE_BASE_PRICE = {"wheat": 270.0, "rice": 550.0, "palm_oil": 950.0, "sugar": 0.45, "poultry": 1.60}
@@ -85,10 +109,7 @@ def parse_pink_sheet(content: bytes) -> list[tuple]:
 
 
 def fetch_live() -> list[tuple]:
-    if LOCAL_COPY.exists():
-        print(f"Using local copy: {LOCAL_COPY}")
-        return parse_pink_sheet(LOCAL_COPY.read_bytes())
-    for url in CANDIDATE_URLS:
+    for url in discover_urls() + CANDIDATE_URLS:
         try:
             print(f"Trying {url[:80]}...")
             r = requests.get(url, timeout=60)
@@ -96,6 +117,9 @@ def fetch_live() -> list[tuple]:
             return parse_pink_sheet(r.content)
         except Exception as exc:
             print(f"  failed: {exc}")
+    if LOCAL_COPY.exists():
+        print(f"All URLs failed — using local copy: {LOCAL_COPY}")
+        return parse_pink_sheet(LOCAL_COPY.read_bytes())
     return []
 
 
@@ -154,7 +178,14 @@ def main() -> None:
     if rows:
         inserted = store_rows(conn, rows)
         record_data_source(conn, "prices", "live")
-        print(f"Loaded {inserted} live price points from the World Bank Pink Sheet.")
+        newest = max(period for period, _, _ in rows)
+        print(f"Loaded {inserted} live price points from the World Bank Pink Sheet "
+              f"(latest month: {newest}).")
+        today = date.today()
+        lag = (today.year - int(newest[:4])) * 12 + today.month - int(newest[5:7])
+        if lag > STALE_MONTHS:
+            print(f"WARNING: latest price month is {lag} months old — the source "
+                  f"may be a stale release; check {PAGE_URL}.")
     else:
         # Never replace existing data with synthetic data: fall back to
         # sample prices only when the table is empty (fresh clone / demo).

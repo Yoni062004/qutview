@@ -77,9 +77,11 @@ for start in range(0, len(rows_list), PER_ROW):
     for col, (_, row) in zip(cols, rows_list[start:start + PER_ROW]):
         year = int(row.year)
         mirror = row.source == "mirror_derived"
+        # Keep the label short enough that st.metric doesn't truncate it —
+        # the ⓘ tooltip and the caption below carry the mirror-derived detail.
         label = f"{risk_color(row.composite_risk)} {row['name']} — {year}"
         if mirror:
-            label += " (provisional, mirror-derived)"
+            label += " (provisional)"
         help_txt = None
         gate = gate_cov.get(row.commodity_id)
         if mirror and gate:
@@ -106,11 +108,12 @@ for start in range(0, len(rows_list), PER_ROW):
 
 if (risks["source"] == "mirror_derived").any():
     st.caption(
-        f"**Provisional years:** the UAE has not yet published annual customs data "
-        f"after {int(uae_max_year)}, so more recent years are reconstructed from what "
-        f"partner countries report exporting to the UAE (mirror statistics, FOB "
-        f"values). Corridors whose mirror picture is too incomplete stay at their "
-        f"last UAE-reported year — hover a card's ⓘ for the cross-check."
+        f"**Provisional years are mirror-derived:** the UAE has not yet published "
+        f"annual customs data after {int(uae_max_year)}, so more recent years are "
+        f"reconstructed from what partner countries report exporting to the UAE "
+        f"(mirror statistics, FOB values). Corridors whose mirror picture is too "
+        f"incomplete stay at their last UAE-reported year — hover a card's ⓘ for "
+        f"the cross-check."
     )
 
 st.divider()
@@ -269,7 +272,11 @@ st.subheader("Monthly corridor monitor — mirror data")
 # Colors are assigned to origins by total value once per dataset and never
 # re-cycled, so an origin keeps its color across charts and reruns.
 ORIGIN_COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#56B4E9", "#E69F00"]
-CHART_BG = dict(paper_bgcolor="#fcfcfb", plot_bgcolor="#fcfcfb")
+# These charts force a light surface, so the text color must be forced dark
+# too — otherwise Plotly follows the viewer's dark theme and renders white
+# titles/legends invisibly on the near-white background.
+CHART_BG = dict(paper_bgcolor="#fcfcfb", plot_bgcolor="#fcfcfb",
+                font=dict(color="#333333"))
 
 monthly = load(
     """SELECT f.period, c.name AS origin, f.trade_value_usd
