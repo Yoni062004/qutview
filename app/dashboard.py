@@ -36,31 +36,82 @@ badge = " · ".join(
 st.title("QUTVIEW — UAE Food Import Corridor Risk")
 st.caption(f"Sovereign food-security supply-chain intelligence · Data sources — {badge}")
 
+# Latest available year per commodity: UAE-reported where published,
+# mirror-derived beyond that (only where mirror coverage passed the gate,
+# so commodities like wheat honestly stay at their last UAE-reported year).
 risks = load(
     """SELECT r.*, c.name FROM risk_scores r
        JOIN dim_commodity c ON c.commodity_id = r.commodity_id
-       WHERE r.year = (SELECT max(year) FROM risk_scores)
+       WHERE r.year = (SELECT max(year) FROM risk_scores r2
+                       WHERE r2.commodity_id = r.commodity_id)
        ORDER BY r.composite_risk DESC"""
 )
 if risks.empty:
     st.error("No risk scores found. Run the pipeline scripts in README order first.")
     st.stop()
 
-latest_year = int(risks["year"].iloc[0])
+if "source" not in risks.columns:  # database predates provenance tracking
+    risks["source"] = "uae_reported"
+
+# Latest gate-year mirror coverage per commodity, for card tooltips.
+cov_annual = load(
+    """SELECT commodity_id, year, coverage_pct FROM mirror_coverage_annual m
+       WHERE coverage_pct IS NOT NULL
+         AND year = (SELECT max(year) FROM mirror_coverage_annual m2
+                     WHERE m2.commodity_id = m.commodity_id
+                       AND m2.coverage_pct IS NOT NULL)"""
+)
+gate_cov = {
+    r.commodity_id: (int(r.year), float(r.coverage_pct)) for _, r in cov_annual.iterrows()
+}
+uae_max_year = load(
+    "SELECT max(year) AS y FROM risk_scores WHERE source = 'uae_reported'"
+)["y"].iloc[0]
 
 # ---------------- overview risk cards ----------------
-st.subheader(f"Corridor risk overview — {latest_year}")
+st.subheader("Corridor risk overview — latest available year per corridor")
 PER_ROW = 4
 rows_list = list(risks.iterrows())
 for start in range(0, len(rows_list), PER_ROW):
     cols = st.columns(PER_ROW)
     for col, (_, row) in zip(cols, rows_list[start:start + PER_ROW]):
+        year = int(row.year)
+        mirror = row.source == "mirror_derived"
+        label = f"{risk_color(row.composite_risk)} {row['name']} — {year}"
+        if mirror:
+            label += " (provisional, mirror-derived)"
+        help_txt = None
+        gate = gate_cov.get(row.commodity_id)
+        if mirror and gate:
+            help_txt = (
+                f"The UAE has not published annual data for {year} yet; this score is "
+                f"reconstructed from partner countries' reported exports to the UAE "
+                f"(FOB values). Cross-check: mirror covered {gate[1]:.0f}% of "
+                f"UAE-reported value in {gate[0]}."
+            )
+        elif not mirror and year < int(risks["year"].max()) and gate:
+            help_txt = (
+                f"Not extended past {year} (last UAE-reported year): partner-country "
+                f"reporting covered only {gate[1]:.0f}% of UAE-reported value in "
+                f"{gate[0]} — a major origin is missing from mirror data, so newer "
+                f"mirror-derived scores would be misleading."
+            )
         col.metric(
-            f"{risk_color(row.composite_risk)} {row['name']}",
+            label,
             f"{row.composite_risk:.0f} / 100",
             f"top origin: {row.top_origin} ({row.top_origin_share*100:.0f}%)",
             delta_color="off",
+            help=help_txt,
         )
+
+if (risks["source"] == "mirror_derived").any():
+    st.caption(
+        f"**Provisional years:** the UAE has not yet published annual customs data "
+        f"after {int(uae_max_year)}, so more recent years are reconstructed from what "
+        f"partner countries report exporting to the UAE (mirror statistics, FOB "
+        f"values). Corridors whose mirror picture is too incomplete stay at their "
+        f"last UAE-reported year — hover a card's ⓘ for the cross-check."
+    )
 
 st.divider()
 
@@ -71,11 +122,16 @@ cid = st.selectbox(
     format_func=lambda c: COMMODITIES[c]["name"],
 )
 detail = risks[risks["commodity_id"] == cid].iloc[0]
+detail_year = int(detail.year)
+detail_mirror = detail.source == "mirror_derived"
 
 left, right = st.columns([1, 2])
 
 with left:
-    st.markdown(f"### {COMMODITIES[cid]['name']}")
+    st.markdown(
+        f"### {COMMODITIES[cid]['name']} — {detail_year}"
+        + (" *(provisional, mirror-derived)*" if detail_mirror else "")
+    )
     st.metric("Composite risk", f"{detail.composite_risk:.1f} / 100")
     dep = load(
         """SELECT dependency_pct, import_kt, production_kt FROM dependency_ratios
@@ -105,12 +161,13 @@ with left:
             f"{bt.mape_pct[0]:.1f}%",
         )
 
+    flows_table = "fact_imports_mirror_annual" if detail_mirror else "fact_imports"
     origins = load(
-        """SELECT c.name AS origin, f.trade_value_usd
-           FROM fact_imports f JOIN dim_country c ON c.country_code = f.origin_code
+        f"""SELECT c.name AS origin, f.trade_value_usd
+           FROM {flows_table} f JOIN dim_country c ON c.country_code = f.origin_code
            WHERE f.commodity_id = ? AND f.year = ?
            ORDER BY f.trade_value_usd DESC LIMIT 8""",
-        (cid, latest_year),
+        (cid, detail_year),
     )
     fig = go.Figure(go.Bar(
         x=origins["trade_value_usd"] / 1e6,
@@ -118,7 +175,8 @@ with left:
         orientation="h",
     ))
     fig.update_layout(
-        title=f"Import value by origin, {latest_year} (USD millions)",
+        title=f"Import value by origin, {detail_year} (USD millions"
+              + (", origin-reported)" if detail_mirror else ")"),
         height=320, margin=dict(l=10, r=10, t=40, b=10),
         yaxis=dict(autorange="reversed"),
     )
@@ -152,17 +210,56 @@ with right:
     st.plotly_chart(fig, width="stretch")
 
     trend = load(
-        "SELECT year, composite_risk, hhi FROM risk_scores WHERE commodity_id = ? ORDER BY year",
+        "SELECT year, composite_risk, hhi, source FROM risk_scores "
+        "WHERE commodity_id = ? ORDER BY year",
         (cid,),
     )
+    reported = trend[trend["source"] == "uae_reported"]
+    provisional = trend[trend["source"] == "mirror_derived"]
     fig2 = go.Figure(go.Scatter(
-        x=trend["year"], y=trend["composite_risk"], mode="lines+markers", name="Composite risk"
+        x=reported["year"], y=reported["composite_risk"],
+        mode="lines+markers", name="UAE-reported",
     ))
+    if not provisional.empty:
+        # Prepend the last reported point so the provisional segment connects.
+        seg = pd.concat([reported.tail(1), provisional])
+        fig2.add_trace(go.Scatter(
+            x=seg["year"], y=seg["composite_risk"],
+            mode="lines+markers", name="provisional (mirror-derived)",
+            line=dict(dash="dash"), marker=dict(symbol="circle-open"),
+        ))
     fig2.update_layout(
         title="Composite corridor risk over time (0–100)",
         height=260, margin=dict(l=10, r=10, t=40, b=10),
     )
     st.plotly_chart(fig2, width="stretch")
+
+    cov_hist = load(
+        "SELECT year, coverage_pct FROM mirror_coverage_annual "
+        "WHERE commodity_id = ? AND coverage_pct IS NOT NULL ORDER BY year DESC LIMIT 3",
+        (cid,),
+    )
+    if detail_mirror and not cov_hist.empty:
+        checks = ", ".join(
+            f"{r.coverage_pct:.0f}% ({int(r.year)})" for _, r in cov_hist.iterrows()
+        )
+        st.caption(
+            f"**Provisional-year caveat:** {detail_year} is reconstructed from partner "
+            f"countries' reported exports to the UAE (mirror statistics). Mirror values "
+            f"are FOB while UAE customs figures are CIF, and origins may count shipments "
+            f"the UAE books as transit. Cross-check on overlap years — mirror vs "
+            f"UAE-reported: {checks}."
+        )
+    elif not detail_mirror and detail_year < int(risks["year"].max()) and not cov_hist.empty:
+        gate = cov_hist.iloc[0]
+        st.caption(
+            f"**Why this corridor stops at {detail_year}:** the UAE has published "
+            f"nothing newer, and partner-country reporting covered only "
+            f"{gate.coverage_pct:.0f}% of UAE-reported value in {int(gate.year)} — a "
+            f"major origin is missing from mirror data (e.g. Russia stopped publishing "
+            f"to Comtrade after 2021), so a mirror-derived score would name the wrong "
+            f"top origin. Shown honestly instead of guessed."
+        )
 
 # ---------------- monthly corridor monitor (mirror data) ----------------
 st.divider()

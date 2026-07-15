@@ -5,8 +5,9 @@ One command keeps everything current:
     python scripts/refresh_all.py
 
 Order: schema -> ingests (Comtrade annual, World Bank prices, Comtrade
-mirror monthly, FAOSTAT production) -> risk indicators (annual, monthly,
-dependency) -> forecasts -> Power BI CSV export.
+mirror monthly, Comtrade mirror annual, FAOSTAT production) -> risk
+indicators (annual, monthly, dependency) -> forecasts -> Power BI CSV
+export.
 
 Ingest steps are allowed to fail (an API being down just means existing
 data is kept — the ingest scripts never overwrite live data with sample
@@ -30,6 +31,7 @@ STEPS = [
     ("src/ingest/comtrade_imports.py", True),
     ("src/ingest/worldbank_prices.py", True),
     ("src/ingest/comtrade_mirror_monthly.py", True),
+    ("src/ingest/comtrade_mirror_annual.py", True),
     ("src/ingest/faostat_production.py", True),
     ("src/features/risk_indicators.py", False),
     ("src/features/risk_indicators_monthly.py", False),

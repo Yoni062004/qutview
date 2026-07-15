@@ -30,6 +30,8 @@ python src/db/init_db.py
 python src/ingest/comtrade_imports.py           # add --sample to skip the API
 python src/ingest/worldbank_prices.py           # add --sample to skip the download
 python src/ingest/comtrade_mirror_monthly.py    # monthly mirror flows (needs API key)
+python src/ingest/comtrade_mirror_annual.py     # annual mirror flows for years the UAE
+                                                # hasn't published yet (needs API key)
 python src/ingest/faostat_production.py         # UAE domestic production (FAOSTAT bulk)
 python src/features/risk_indicators.py
 python src/features/risk_indicators_monthly.py
@@ -58,6 +60,7 @@ is the only manual step (Power BI Desktop has no unattended refresh).
 │   ├── ingest/
 │   │   ├── comtrade_imports.py            # UAE annual import flows by origin (UN Comtrade)
 │   │   ├── comtrade_mirror_monthly.py     # monthly flows via mirror statistics (origin-reported)
+│   │   ├── comtrade_mirror_annual.py      # annual mirror flows extending past the last UAE-published year
 │   │   ├── faostat_production.py          # UAE domestic production (FAOSTAT bulk file)
 │   │   └── worldbank_prices.py            # monthly prices (World Bank Pink Sheet)
 │   ├── features/

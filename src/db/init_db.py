@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS risk_scores (
     n_origins        INTEGER,
     price_volatility REAL,                -- stdev of monthly returns
     composite_risk   REAL,                -- 0..100
+    source           TEXT NOT NULL DEFAULT 'uae_reported',  -- 'uae_reported' | 'mirror_derived'
     PRIMARY KEY (year, commodity_id)
 );
 
@@ -129,12 +130,43 @@ CREATE TABLE IF NOT EXISTS mirror_coverage (
     basis_year      INTEGER,
     coverage_pct    REAL
 );
+
+-- Annual corridor flows reconstructed from mirror statistics: every country
+-- reporting exports to the UAE, used to extend the annual series past the
+-- last UAE-published year (the UAE releases annual data ~18 months late).
+-- Kept separate from fact_imports so UAE-reported data is never mixed with
+-- origin-reported FOB values.
+CREATE TABLE IF NOT EXISTS fact_imports_mirror_annual (
+    year            INTEGER NOT NULL,
+    commodity_id    TEXT NOT NULL REFERENCES dim_commodity(commodity_id),
+    origin_code     INTEGER NOT NULL REFERENCES dim_country(country_code),
+    trade_value_usd REAL,
+    net_weight_kg   REAL,
+    PRIMARY KEY (year, commodity_id, origin_code)
+);
+
+-- Annual-mirror cross-check: mirror total as % of the UAE-reported total for
+-- every year both sources cover. Persisted per year (not just the latest) so
+-- drift is visible, e.g. wheat collapsing after Russia stopped publishing.
+CREATE TABLE IF NOT EXISTS mirror_coverage_annual (
+    commodity_id    TEXT NOT NULL REFERENCES dim_commodity(commodity_id),
+    year            INTEGER NOT NULL,
+    coverage_pct    REAL,
+    PRIMARY KEY (commodity_id, year)
+);
 """
 
 
 def main() -> None:
     conn = get_connection()
     conn.executescript(SCHEMA)
+    # Migration for databases created before provenance tracking: CREATE TABLE
+    # IF NOT EXISTS never adds columns to an existing table.
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(risk_scores)")]
+    if "source" not in cols:
+        conn.execute(
+            "ALTER TABLE risk_scores ADD COLUMN source TEXT NOT NULL DEFAULT 'uae_reported'"
+        )
     for cid, meta in COMMODITIES.items():
         conn.execute(
             "INSERT OR REPLACE INTO dim_commodity "
