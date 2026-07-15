@@ -1,0 +1,317 @@
+"""Generative corridor intelligence brief (roadmap item A1).
+
+Turns the database into a short written brief with one recommended action
+per commodity corridor. Two clean layers, kept strictly separate:
+
+  1. FACT ASSEMBLER — assemble_facts(): pure, deterministic Python. Pulls
+     every number the brief is allowed to use out of the star schema into
+     one dict, recording anything missing under "gaps". This dict is the
+     single source of truth; nothing downstream may introduce a number
+     that is not in it.
+  2. BRIEF GENERATOR — template mode: a deterministic rule-based text
+     builder over the fact dict, so the module always runs offline (same
+     philosophy as the sample-data fallbacks elsewhere in the project).
+     LLM mode (Anthropic API) is planned but not built yet; the CLI says
+     which mode produced the text.
+
+Provenance discipline: the brief states whether its year is UAE-reported
+or mirror-derived/provisional, and for corridors held back by the mirror
+coverage gate (see features/risk_indicators.py) it says why newer years
+are not scored instead of pretending they don't exist.
+
+Decision-support constraint: the brief is a DRAFT for a human procurement
+officer to approve — it recommends, it never decides or claims an action
+was taken. Both modes carry the DRAFT header, phrase the action as
+"Recommended for review", and end with an analyst sign-off line; the LLM
+mode must additionally embed DECISION_SUPPORT_RULE in its system prompt.
+
+Run:  python src/brief/corridor_brief.py wheat            (brief only)
+      python src/brief/corridor_brief.py wheat --facts    (fact dict + brief)
+"""
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from common import COMMODITIES, get_connection
+from features.risk_indicators import MIN_MIRROR_COVERAGE_PCT
+
+# Non-negotiable framing rule. Baked into the template output below and to be
+# embedded verbatim in the LLM system prompt when that mode is built.
+DECISION_SUPPORT_RULE = (
+    "You draft analysis and RECOMMEND an action for a human procurement "
+    "officer to approve; you never state or imply an action was taken, and "
+    "you never present yourself as the decision-maker. The human is always "
+    "in the loop."
+)
+
+# ---------------------------------------------------------------- layer 1
+
+
+def _row(conn, query, params=()):
+    cur = conn.execute(query, params)
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return dict(zip([c[0] for c in cur.description], row))
+
+
+def assemble_facts(conn, cid: str) -> dict:
+    """Every number the brief may use, from the DB, with gaps recorded.
+    Deterministic, no AI, no derived guesses beyond arithmetic."""
+    if cid not in COMMODITIES:
+        sys.exit(f"Unknown commodity '{cid}'. Choose from: {', '.join(COMMODITIES)}")
+    gaps = []
+
+    latest = _row(conn, """SELECT year, source, composite_risk, hhi, top_origin,
+                                  top_origin_share, n_origins, price_volatility
+                           FROM risk_scores WHERE commodity_id = ?
+                           ORDER BY year DESC LIMIT 1""", (cid,))
+    if latest is None:
+        sys.exit(f"No risk scores for {cid} — run the pipeline first.")
+
+    previous = _row(conn, """SELECT year, composite_risk, top_origin, top_origin_share
+                             FROM risk_scores WHERE commodity_id = ? AND year < ?
+                             ORDER BY year DESC LIMIT 1""", (cid, latest["year"]))
+    if previous is None:
+        gaps.append("no previous-year risk score to compare against")
+
+    monthly = None
+    mrows = conn.execute(
+        """SELECT period, composite_risk FROM risk_scores_monthly
+           WHERE commodity_id = ? ORDER BY period""", (cid,)).fetchall()
+    if mrows:
+        latest_m, prev_m = mrows[-1], (mrows[-2] if len(mrows) > 1 else None)
+        six_m = mrows[-7] if len(mrows) > 6 else None
+        change = (latest_m[1] - six_m[1]) if six_m else (
+            latest_m[1] - prev_m[1] if prev_m else None)
+        monthly = {
+            "latest_period": latest_m[0],
+            "latest_risk": latest_m[1],
+            "change_window_months": 6 if six_m else (1 if prev_m else None),
+            "change": change,
+            "direction": (None if change is None else
+                          "rising" if change > 1 else
+                          "falling" if change < -1 else "stable"),
+        }
+    else:
+        gaps.append("no monthly rolling risk series (mirror monitor not loaded)")
+
+    flows_table = ("fact_imports_mirror_annual" if latest["source"] == "mirror_derived"
+                   else "fact_imports")
+    origin_rows = conn.execute(
+        f"""SELECT c.name, f.trade_value_usd FROM {flows_table} f
+            JOIN dim_country c ON c.country_code = f.origin_code
+            WHERE f.commodity_id = ? AND f.year = ? AND f.trade_value_usd > 0
+            ORDER BY f.trade_value_usd DESC""", (cid, latest["year"])).fetchall()
+    total_value = sum(v for _, v in origin_rows)
+    top_origins = [
+        {"origin": name, "value_usd": value, "share": value / total_value}
+        for name, value in origin_rows[:5]
+    ]
+
+    dependency = _row(conn, """SELECT year, dependency_pct, import_kt, production_kt
+                               FROM dependency_ratios
+                               WHERE commodity_id = ? AND dependency_pct IS NOT NULL
+                               ORDER BY year DESC LIMIT 1""", (cid,))
+    if dependency is None:
+        gaps.append("no import-dependency data (FAOSTAT production not loaded)")
+    exposure_adjusted = (latest["composite_risk"] * dependency["dependency_pct"] / 100
+                         if dependency else None)
+
+    price = _row(conn, """SELECT period, price FROM fact_prices
+                          WHERE commodity_id = ? ORDER BY period DESC LIMIT 1""", (cid,))
+    if price is None:
+        gaps.append("no price series")
+
+    forecast = None
+    fc = _row(conn, """SELECT period, forecast FROM forecasts
+                       WHERE commodity_id = ? ORDER BY period DESC LIMIT 1""", (cid,))
+    if fc and price and price["price"]:
+        pct = 100 * (fc["forecast"] - price["price"]) / price["price"]
+        forecast = {
+            "end_period": fc["period"], "value": fc["forecast"],
+            "pct_vs_latest_price": pct,
+            "direction": "rising" if pct > 1 else "falling" if pct < -1 else "roughly flat",
+        }
+    else:
+        gaps.append("no price forecast")
+
+    backtest = _row(conn, """SELECT horizon_months, mape_pct FROM backtest_metrics
+                             WHERE commodity_id = ?""", (cid,))
+    if backtest is None:
+        gaps.append("no forecast backtest — forecast accuracy unknown")
+
+    gate = _row(conn, """SELECT year, coverage_pct FROM mirror_coverage_annual
+                         WHERE commodity_id = ? AND coverage_pct IS NOT NULL
+                         ORDER BY year DESC LIMIT 1""", (cid,))
+    newer_mirror_years = [y for (y,) in conn.execute(
+        """SELECT DISTINCT year FROM fact_imports_mirror_annual
+           WHERE commodity_id = ? AND year > ? ORDER BY year""",
+        (cid, latest["year"]))]
+
+    return {
+        "commodity": {"id": cid, "name": COMMODITIES[cid]["name"],
+                      "hs_code": COMMODITIES[cid]["hs"], "price_unit": COMMODITIES[cid]["unit"]},
+        "risk_latest": latest,
+        "risk_previous": previous,
+        "monthly_trend": monthly,
+        "top_origins": top_origins,
+        "total_import_value_usd": total_value,
+        "dependency": dependency,
+        "exposure_adjusted_risk": exposure_adjusted,
+        "latest_price": price,
+        "forecast": forecast,
+        "backtest": backtest,
+        "provenance": {
+            "source": latest["source"],
+            "provisional": latest["source"] == "mirror_derived",
+            "mirror_gate": (None if gate is None else {
+                "gate_year": gate["year"],
+                "coverage_pct": gate["coverage_pct"],
+                "threshold_pct": MIN_MIRROR_COVERAGE_PCT,
+                "passed": gate["coverage_pct"] >= MIN_MIRROR_COVERAGE_PCT,
+            }),
+            "newer_mirror_years_unscored": newer_mirror_years,
+        },
+        "gaps": gaps,
+    }
+
+
+# ---------------------------------------------------------------- layer 2
+
+
+def _pick_action(f: dict) -> str:
+    """One concrete recommended action, chosen by rule and built only from
+    fact-dict numbers. Ordered by what matters most for this corridor."""
+    r = f["risk_latest"]
+    top = f["top_origins"][0] if f["top_origins"] else None
+    gate = f["provenance"]["mirror_gate"]
+
+    if (gate and not gate["passed"] and f["provenance"]["newer_mirror_years_unscored"]
+            and top):
+        return (f"Validate the current supplier mix directly with contracted suppliers: "
+                f"partner-country reporting covers only {gate['coverage_pct']:.0f}% of "
+                f"UAE-reported {gate['gate_year']} value, so the {r['year']} picture "
+                f"(top origin {top['origin']}, {top['share']*100:.0f}% of value) cannot "
+                f"be confirmed from trade data for "
+                f"{'/'.join(str(y) for y in f['provenance']['newer_mirror_years_unscored'])}.")
+    if top and top["share"] >= 0.60:
+        return (f"Qualify a second origin for {f['commodity']['name'].lower()} — "
+                f"{top['origin']} supplied {top['share']*100:.0f}% of "
+                f"{r['year']} import value (${top['value_usd']/1e6:.0f}M), a single-source "
+                f"exposure across {r['n_origins']} total origins.")
+    if (f["monthly_trend"] and f["monthly_trend"]["direction"] == "rising"
+            and r["composite_risk"] >= 50):
+        return (f"Escalate monitoring: composite risk is {r['composite_risk']:.0f}/100 and "
+                f"the rolling monitor moved {f['monthly_trend']['change']:+.1f} points over "
+                f"the last {f['monthly_trend']['change_window_months']} months "
+                f"(as of {f['monthly_trend']['latest_period']}).")
+    if f["dependency"] and f["dependency"]["dependency_pct"] >= 80 and top:
+        return (f"Review stock cover: {f['dependency']['dependency_pct']:.0f}% "
+                f"import-dependent with {top['origin']} at {top['share']*100:.0f}% of "
+                f"supply — domestic production ({f['dependency']['production_kt']:.0f} kt) "
+                f"cannot buffer a corridor disruption.")
+    return (f"Maintain current posture and keep the monthly monitor in view — risk "
+            f"{r['composite_risk']:.0f}/100 with top origin {r['top_origin']} at "
+            f"{r['top_origin_share']*100:.0f}%.")
+
+
+def build_template_brief(f: dict) -> str:
+    r = f["risk_latest"]
+    name = f["commodity"]["name"]
+    prov = f["provenance"]
+    year_label = (f"{r['year']} (provisional, mirror-derived)" if prov["provisional"]
+                  else f"{r['year']} (UAE-reported)")
+    lines = ["DRAFT — corridor intelligence for procurement review",
+             f"{name} · data year {year_label}", ""]
+
+    posture = (f"Composite corridor risk {r['composite_risk']:.1f}/100"
+               f" (HHI {r['hhi']:.2f}, top origin {r['top_origin']} at"
+               f" {r['top_origin_share']*100:.0f}%, {r['n_origins']} origins).")
+    if f["risk_previous"]:
+        p = f["risk_previous"]
+        posture += (f" In {p['year']}: {p['composite_risk']:.1f}/100 with {p['top_origin']}"
+                    f" at {p['top_origin_share']*100:.0f}%.")
+    lines += [posture]
+
+    if f["monthly_trend"] and f["monthly_trend"]["direction"]:
+        m = f["monthly_trend"]
+        lines += [f"Rolling monitor: {m['direction']} ({m['change']:+.1f} points over "
+                  f"{m['change_window_months']} months, as of {m['latest_period']}; level "
+                  f"not comparable to the annual score — read direction only)."]
+
+    if f["top_origins"]:
+        mix = ", ".join(f"{o['origin']} {o['share']*100:.0f}%" for o in f["top_origins"])
+        lines += [f"Supply mix {r['year']} (${f['total_import_value_usd']/1e6:.0f}M "
+                  f"import value): {mix}."]
+
+    if f["dependency"]:
+        d = f["dependency"]
+        dep_line = (f"Import dependency {d['dependency_pct']:.0f}% by weight in {d['year']} "
+                    f"({d['import_kt']:.0f} kt imported vs {d['production_kt']:.0f} kt "
+                    f"domestic production)")
+        if f["exposure_adjusted_risk"] is not None:
+            dep_line += f" — exposure-adjusted risk {f['exposure_adjusted_risk']:.1f}/100"
+        lines += [dep_line + "."]
+
+    if f["latest_price"] and f["forecast"]:
+        lines += [f"Price: {f['latest_price']['price']:.2f} {f['commodity']['price_unit']} "
+                  f"({f['latest_price']['period']}); 6-month forecast {f['forecast']['direction']} "
+                  f"({f['forecast']['pct_vs_latest_price']:+.1f}% by {f['forecast']['end_period']})."]
+
+    gate = prov["mirror_gate"]
+    if prov["provisional"] and gate:
+        lines += ["", f"Data currency: {r['year']} is reconstructed from partner countries' "
+                  f"reported exports to the UAE (mirror statistics, FOB values); cross-check "
+                  f"on the last overlap year ({gate['gate_year']}): mirror covered "
+                  f"{gate['coverage_pct']:.0f}% of UAE-reported value."]
+    elif gate and not gate["passed"] and prov["newer_mirror_years_unscored"]:
+        years = "/".join(str(y) for y in prov["newer_mirror_years_unscored"])
+        lines += ["", f"Data currency: {r['year']} is the last UAE-reported year. Mirror "
+                  f"data exists for {years} but covers only {gate['coverage_pct']:.0f}% of "
+                  f"UAE-reported {gate['gate_year']} value (threshold "
+                  f"{gate['threshold_pct']:.0f}%) — a major origin is missing from partner "
+                  f"reporting, so newer years are deliberately not scored rather than "
+                  f"scored wrong."]
+
+    lines += ["", f"Recommended for review: {_pick_action(f)}"]
+
+    caveats = []
+    if f["backtest"]:
+        caveats.append(f"forecast backtest MAPE {f['backtest']['mape_pct']:.1f}% over "
+                       f"{f['backtest']['horizon_months']} months")
+    if gate:
+        caveats.append(f"annual mirror coverage {gate['coverage_pct']:.0f}% "
+                       f"({gate['gate_year']})")
+    caveats += f["gaps"]
+    lines += ["", "Confidence & caveats: " + ("; ".join(caveats) if caveats else "none") + ".",
+              "", "Analyst decision: [ ] approve  [ ] revise"]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- CLI
+
+
+def main() -> None:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if not args:
+        sys.exit(f"Usage: python src/brief/corridor_brief.py <commodity> [--facts]\n"
+                 f"Commodities: {', '.join(COMMODITIES)}")
+    cid = args[0]
+    conn = get_connection()
+    facts = assemble_facts(conn, cid)
+    conn.close()
+
+    if "--facts" in sys.argv:
+        print("FACT DICT (single source of truth for the brief):")
+        print(json.dumps(facts, indent=2, default=str))
+        print()
+
+    print(build_template_brief(facts))
+    print("\n[mode: template — deterministic, no AI; LLM mode not built yet]")
+
+
+if __name__ == "__main__":
+    main()
