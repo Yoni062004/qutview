@@ -31,6 +31,12 @@ Each entry is one or two sentences, tied back to the project where it helps.
 - **Re-exports** — goods that pass *through* a country and get shipped onward (lots of gold transits Dubai). They muddy trade numbers.
 - **FOB / CIF** — two ways to price a shipment: **FOB** (Free On Board) = value at the exporting port, no shipping; **CIF** (Cost, Insurance, Freight) = value at the arriving port, shipping included. The two never match — a source of the mirror-gap.
 - **Landed cost** — the *total* cost of a good once it arrives: price + shipping + insurance + duties. What a buyer actually pays. The alternative-sourcing feature needs this data (why it's roadmap, not done).
+- **Reporter / partner (Comtrade)** — every trade record names who *submitted* it (the reporter) and who they traded with (the partner). Mirror statistics = flipping the two: when the UAE goes quiet as a reporter, you read India's report of exports *to* the UAE as a partner.
+- **Reporting lag** — the delay between a year ending and a country publishing its official trade data. The UAE's annual lag is ~18 months (2023 only appeared in mid-2025) — the whole reason QUTVIEW reconstructs recent years from mirrors.
+- **UAE-reported vs. mirror-derived** — QUTVIEW's two data pedigrees for a year: computed from the UAE's own customs data, or reconstructed from partner countries' export reports. Every risk score carries this label.
+- **Provisional** — the best number available *now*, expected to be superseded when official data lands. The "2025 (provisional, mirror-derived)" risk cards; never presented as final.
+- **Coverage / coverage gate** — coverage = how much of the officially reported trade the mirror actually captures, checked on a year both sources report. The gate = the honesty rule: below 75%, QUTVIEW refuses to score newer years for that commodity rather than name a wrong top supplier (wheat is 58% because Russia stopped publishing, so wheat stays at 2023).
+- **Provenance** — where a number came from and how it was made. QUTVIEW tracks it everywhere (LIVE vs SAMPLE badge, UAE-reported vs mirror-derived) so nothing looks more certain than it is — the project's core credibility claim.
 - **Comtrade** — the UN's global trade database. QUTVIEW's main import-flow source.
 - **Pink Sheet** — the World Bank's monthly commodity-price report (nicknamed for its old pink paper). The price source; already includes coffee.
 - **FAOSTAT** — the UN Food & Agriculture Organization's statistics database. The source for domestic production.
