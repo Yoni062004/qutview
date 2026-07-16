@@ -43,6 +43,11 @@ streamlit run app/dashboard.py
 
 # 5. (Optional) Export CSVs for the Power BI report
 python scripts/export_powerbi.py     # then follow docs/powerbi_guide.md
+
+# 6. (Optional) Generated corridor brief in the terminal — LLM-written if
+#    ANTHROPIC_API_KEY is set in .env, deterministic template otherwise.
+#    Also shown on the dashboard for the selected commodity.
+python src/brief/corridor_brief.py wheat        # add --facts to audit numbers
 ```
 
 Refreshing later: `python scripts/refresh_all.py` re-pulls all sources and
@@ -67,6 +72,7 @@ is the only manual step (Power BI Desktop has no unattended refresh).
 │   │   ├── risk_indicators.py             # annual HHI, dependency, volatility → composite risk
 │   │   ├── risk_indicators_monthly.py     # rolling 12-month risk series from mirror flows
 │   │   └── dependency_ratios.py           # import dependency vs domestic production
+│   ├── brief/corridor_brief.py    # fact assembler + LLM/template corridor intelligence brief
 │   └── models/forecast.py         # SARIMAX forecasts + backtested MAPE
 └── data/qutview.db                # generated — not committed
 ```

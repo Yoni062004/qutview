@@ -12,6 +12,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from common import COMMODITIES, DB_PATH  # noqa: E402
+from brief.corridor_brief import assemble_facts, generate_brief  # noqa: E402
 
 st.set_page_config(page_title="QUTVIEW — Food Corridor Risk", layout="wide")
 
@@ -263,6 +264,29 @@ with right:
             f"to Comtrade after 2021), so a mirror-derived score would name the wrong "
             f"top origin. Shown honestly instead of guessed."
         )
+
+# ---------------- generated intelligence brief ----------------
+st.divider()
+st.subheader("Generated intelligence brief")
+
+
+@st.cache_data(ttl=3600, show_spinner="Drafting corridor brief...")
+def cached_brief(commodity_id: str, data_stamp: str):
+    """data_stamp keys the cache to the last pipeline refresh, so briefs
+    regenerate when the data changes but an LLM call is never repeated for
+    the same commodity on the same data."""
+    with sqlite3.connect(DB_PATH) as conn:
+        facts = assemble_facts(conn, commodity_id)
+    return generate_brief(facts)
+
+
+data_stamp = load("SELECT coalesce(max(loaded_at), '') AS s FROM data_source")["s"].iloc[0]
+brief_text, brief_mode, brief_detail = cached_brief(cid, str(data_stamp))
+
+badge = ("🤖 LLM-GENERATED · " + brief_detail if brief_mode == "llm"
+         else "📋 TEMPLATE (deterministic, no AI) · " + brief_detail)
+st.caption(f"Brief source — {badge} · draft for human review, not a decision")
+st.text(brief_text)
 
 # ---------------- monthly corridor monitor (mirror data) ----------------
 st.divider()

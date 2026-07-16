@@ -29,22 +29,40 @@ COMMODITIES = {
 }
 
 
-def get_comtrade_key() -> str | None:
-    """Read COMTRADE_API_KEY from the environment or a .env file in the
-    project root. Returns None when no key is configured — callers fall
-    back to the free preview endpoint."""
-    key = os.environ.get("COMTRADE_API_KEY")
-    if key:
-        return key
+def _read_env(name: str) -> str | None:
+    """Read a setting from the environment or the project-root .env file.
+    Placeholder values from .env.example ('paste_your_key_here') count as
+    unset. Returns None when not configured."""
+    value = os.environ.get(name)
+    if value:
+        return value
     env_file = PROJECT_ROOT / ".env"
     if env_file.exists():
         for line in env_file.read_text(encoding="utf-8-sig").splitlines():
             line = line.strip()
-            if line.startswith("COMTRADE_API_KEY") and "=" in line:
+            if line.startswith(name) and "=" in line:
                 value = line.partition("=")[2].strip().strip("'\"")
                 if value and "paste" not in value.lower():
                     return value
     return None
+
+
+def get_comtrade_key() -> str | None:
+    """UN Comtrade API key. None means callers fall back to the free
+    preview endpoint."""
+    return _read_env("COMTRADE_API_KEY")
+
+
+def get_anthropic_key() -> str | None:
+    """Anthropic API key for the corridor-brief LLM mode. None means the
+    brief falls back to the deterministic template."""
+    return _read_env("ANTHROPIC_API_KEY")
+
+
+def get_brief_model() -> str:
+    """Claude model for the corridor brief, overridable via ANTHROPIC_MODEL
+    in .env."""
+    return _read_env("ANTHROPIC_MODEL") or "claude-sonnet-5"
 
 
 def get_connection() -> sqlite3.Connection:

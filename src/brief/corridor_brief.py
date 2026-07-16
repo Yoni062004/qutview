@@ -8,11 +8,18 @@ per commodity corridor. Two clean layers, kept strictly separate:
      one dict, recording anything missing under "gaps". This dict is the
      single source of truth; nothing downstream may introduce a number
      that is not in it.
-  2. BRIEF GENERATOR — template mode: a deterministic rule-based text
-     builder over the fact dict, so the module always runs offline (same
-     philosophy as the sample-data fallbacks elsewhere in the project).
-     LLM mode (Anthropic API) is planned but not built yet; the CLI says
-     which mode produced the text.
+  2. BRIEF GENERATOR — two modes over the same fact dict:
+     - LLM mode (preferred): Claude via the Anthropic API, key from
+       ANTHROPIC_API_KEY in .env, model from ANTHROPIC_MODEL (default
+       claude-sonnet-5). The model receives ONLY the fact dict and a
+       system prompt that forbids inventing numbers. No sampling
+       parameters are sent — current Claude models reject them; the
+       grounding discipline lives in the prompt and the input.
+     - Template mode (fallback): a deterministic rule-based text builder,
+       so the module always runs offline (same philosophy as the
+       sample-data fallbacks elsewhere in the project). Used when no key
+       is configured or the API call fails; the output says which mode
+       produced it.
 
 Provenance discipline: the brief states whether its year is UAE-reported
 or mirror-derived/provisional, and for corridors held back by the mirror
@@ -34,17 +41,46 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common import COMMODITIES, get_connection
+from common import COMMODITIES, get_anthropic_key, get_brief_model, get_connection
 from features.risk_indicators import MIN_MIRROR_COVERAGE_PCT
 
-# Non-negotiable framing rule. Baked into the template output below and to be
-# embedded verbatim in the LLM system prompt when that mode is built.
+# Non-negotiable framing rule. Baked into the template output below and
+# embedded verbatim in the LLM system prompt.
 DECISION_SUPPORT_RULE = (
     "You draft analysis and RECOMMEND an action for a human procurement "
     "officer to approve; you never state or imply an action was taken, and "
     "you never present yourself as the decision-maker. The human is always "
     "in the loop."
 )
+
+HEADER_LINE = "DRAFT — corridor intelligence for procurement review"
+SIGNOFF_LINE = "Analyst decision: [ ] approve  [ ] revise"
+
+LLM_SYSTEM_PROMPT = f"""You write corridor intelligence briefs for QUTVIEW, \
+a UAE food-import risk monitor.
+
+{DECISION_SUPPORT_RULE}
+
+Non-negotiable rules:
+- Use ONLY numbers present in the provided fact JSON. Never invent a figure, \
+a supplier, a freight rate, or a landed cost. Every quantitative claim must \
+trace to a provided field.
+- If something is missing (see "gaps"), say so plainly instead of guessing.
+- State provenance plainly: if provenance.provisional is true, the data year \
+is reconstructed from mirror statistics and the brief must say so; if the \
+mirror gate did not pass and newer_mirror_years_unscored is non-empty, \
+explain that newer years exist in mirror data but are deliberately not \
+scored because coverage is below the threshold.
+- Format, plain text only (no markdown):
+  line 1 exactly: {HEADER_LINE}
+  then a brief of at most 180 words covering risk posture (with the \
+previous-year comparison), origin concentration and supply mix, import \
+dependency, and price/forecast.
+  then one line starting "Recommended for review:" with ONE concrete action \
+grounded in the data — name the numbers that justify it, no vague advice.
+  then one line starting "Confidence & caveats:" including the forecast \
+backtest MAPE, the annual mirror coverage, and any gaps.
+  last line exactly: {SIGNOFF_LINE}"""
 
 # ---------------------------------------------------------------- layer 1
 
@@ -182,6 +218,11 @@ def assemble_facts(conn, cid: str) -> dict:
 # ---------------------------------------------------------------- layer 2
 
 
+def _pct(share: float) -> str:
+    """Format a 0..1 share; tiny-but-real origins read '<1%', never '0%'."""
+    return "<1%" if share < 0.005 else f"{share*100:.0f}%"
+
+
 def _pick_action(f: dict) -> str:
     """One concrete recommended action, chosen by rule and built only from
     fact-dict numbers. Ordered by what matters most for this corridor."""
@@ -224,8 +265,7 @@ def build_template_brief(f: dict) -> str:
     prov = f["provenance"]
     year_label = (f"{r['year']} (provisional, mirror-derived)" if prov["provisional"]
                   else f"{r['year']} (UAE-reported)")
-    lines = ["DRAFT — corridor intelligence for procurement review",
-             f"{name} · data year {year_label}", ""]
+    lines = [HEADER_LINE, f"{name} · data year {year_label}", ""]
 
     posture = (f"Composite corridor risk {r['composite_risk']:.1f}/100"
                f" (HHI {r['hhi']:.2f}, top origin {r['top_origin']} at"
@@ -243,7 +283,7 @@ def build_template_brief(f: dict) -> str:
                   f"not comparable to the annual score — read direction only)."]
 
     if f["top_origins"]:
-        mix = ", ".join(f"{o['origin']} {o['share']*100:.0f}%" for o in f["top_origins"])
+        mix = ", ".join(f"{o['origin']} {_pct(o['share'])}" for o in f["top_origins"])
         lines += [f"Supply mix {r['year']} (${f['total_import_value_usd']/1e6:.0f}M "
                   f"import value): {mix}."]
 
@@ -287,8 +327,56 @@ def build_template_brief(f: dict) -> str:
                        f"({gate['gate_year']})")
     caveats += f["gaps"]
     lines += ["", "Confidence & caveats: " + ("; ".join(caveats) if caveats else "none") + ".",
-              "", "Analyst decision: [ ] approve  [ ] revise"]
+              "", SIGNOFF_LINE]
     return "\n".join(lines)
+
+
+def build_llm_brief(facts: dict) -> str:
+    """Claude writes the brief from the fact dict alone. Raises on any API
+    failure — the caller decides to fall back, never silently. No sampling
+    parameters are sent (current Claude models reject them); grounding comes
+    from the system prompt and the facts-only input."""
+    import anthropic  # lazy import — template mode must work without the SDK
+
+    client = anthropic.Anthropic(api_key=get_anthropic_key())
+    response = client.messages.create(
+        model=get_brief_model(),
+        max_tokens=8000,  # headroom includes the model's internal reasoning
+        system=LLM_SYSTEM_PROMPT,
+        messages=[{
+            "role": "user",
+            "content": (f"Fact JSON for the {facts['commodity']['name']} corridor:\n"
+                        + json.dumps(facts, indent=2, default=str)),
+        }],
+    )
+    if response.stop_reason == "refusal":
+        raise RuntimeError("model declined the request")
+    text = "\n".join(b.text for b in response.content if b.type == "text").strip()
+    if not text:
+        raise RuntimeError(f"empty response (stop_reason={response.stop_reason})")
+    # Belt and braces: the human-in-the-loop framing is not negotiable, even
+    # if the model drops a required line.
+    if not text.startswith(HEADER_LINE):
+        text = HEADER_LINE + "\n" + text
+    if SIGNOFF_LINE not in text:
+        text += "\n\n" + SIGNOFF_LINE
+    return text
+
+
+def generate_brief(facts: dict, force_template: bool = False) -> tuple[str, str, str]:
+    """Best-available brief for a fact dict. Returns (text, mode, detail):
+    mode is 'llm' or 'template'; detail is the model name for LLM output,
+    otherwise the honest reason template mode was used."""
+    if force_template:
+        return build_template_brief(facts), "template", "forced offline"
+    if not get_anthropic_key():
+        return (build_template_brief(facts), "template",
+                "no ANTHROPIC_API_KEY configured")
+    try:
+        return build_llm_brief(facts), "llm", get_brief_model()
+    except Exception as exc:
+        return (build_template_brief(facts), "template",
+                f"LLM call failed: {exc}")
 
 
 # ---------------------------------------------------------------- CLI
@@ -297,7 +385,8 @@ def build_template_brief(f: dict) -> str:
 def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if not args:
-        sys.exit(f"Usage: python src/brief/corridor_brief.py <commodity> [--facts]\n"
+        sys.exit(f"Usage: python src/brief/corridor_brief.py <commodity> "
+                 f"[--facts] [--template]\n"
                  f"Commodities: {', '.join(COMMODITIES)}")
     cid = args[0]
     conn = get_connection()
@@ -309,8 +398,12 @@ def main() -> None:
         print(json.dumps(facts, indent=2, default=str))
         print()
 
-    print(build_template_brief(facts))
-    print("\n[mode: template — deterministic, no AI; LLM mode not built yet]")
+    text, mode, detail = generate_brief(facts, force_template="--template" in sys.argv)
+    print(text)
+    if mode == "llm":
+        print(f"\n[mode: LLM-generated · {detail} · draft for human review]")
+    else:
+        print(f"\n[mode: template — deterministic, no AI · {detail}]")
 
 
 if __name__ == "__main__":
