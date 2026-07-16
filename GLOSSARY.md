@@ -52,8 +52,13 @@ Each entry is one or two sentences, tied back to the project where it helps.
 - **Star schema** — a clean database layout: one central "fact" table (the events) linked to "dimension" tables (the labels). How the SQLite database is organized.
 - **Descriptive → diagnostic → predictive → prescriptive** — the four "rungs" of analytics: *what happened → why → what's coming → what to do*. Value roughly triples each rung. QUTVIEW is climbing to rung 4.
 - **LLM (Large Language Model)** — the AI that turns data tables into written analysis. The engine of the "generative brief" feature.
-- **Grounding** — forcing an AI to use *only* your real data, not its imagination. Prevents made-up numbers.
+- **Grounding** — forcing an AI to use *only* your real data, not its imagination. Prevents made-up numbers. QUTVIEW enforces it mechanically: every number in an LLM brief must trace back to a database value, or the whole output is rejected and the offline template is shown instead — with the reason on the badge.
 - **Hallucination** — when an AI confidently states something false. Grounding is the defense; avoiding it is the whole pitch.
+- **System prompt** — the standing instructions an LLM receives before any user input; where its rules and role live. QUTVIEW's brief prompt forbids invented numbers and bakes in the human-in-the-loop rule.
+- **Human-in-the-loop / decision support** — the AI *drafts and recommends*; a human *approves and decides*. Why every QUTVIEW brief is headed "DRAFT" and ends with an analyst approve/revise line — the system never claims an action was taken.
+- **Temperature** — an old LLM knob controlling output randomness (low = predictable, high = creative). Current Claude models removed it; QUTVIEW gets the same discipline a stronger way — facts-only input plus the mechanical grounding check.
+- **Fact dict** — QUTVIEW's single source of truth for a brief: one structured bundle of every number the AI is allowed to use, pulled straight from the database, with anything missing listed as a gap instead of guessed.
+- **API key / prepaid credits** — an API key is the password a program uses to call a paid service (kept in `.env`, never in git). Anthropic's API bills by usage from a prepaid credit balance — top up once, no subscription, calls just stop (and QUTVIEW falls back to template briefs) if it runs out.
 
 ## Startup & business
 
