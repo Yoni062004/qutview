@@ -13,8 +13,11 @@ per commodity corridor. Two clean layers, kept strictly separate:
        ANTHROPIC_API_KEY in .env, model from ANTHROPIC_MODEL (default
        claude-sonnet-5). The model receives ONLY the fact dict and a
        system prompt that forbids inventing numbers. No sampling
-       parameters are sent — current Claude models reject them; the
-       grounding discipline lives in the prompt and the input.
+       parameters are sent — current Claude models reject them; instead
+       every LLM brief passes a mechanical GROUNDING CHECK: each number
+       in the text must trace to a fact-dict value (allowing the brief's
+       rounding and unit scaling), or the output is rejected and the
+       deterministic template is used, with the reason surfaced.
      - Template mode (fallback): a deterministic rule-based text builder,
        so the module always runs offline (same philosophy as the
        sample-data fallbacks elsewhere in the project). Used when no key
@@ -36,6 +39,7 @@ Run:  python src/brief/corridor_brief.py wheat            (brief only)
       python src/brief/corridor_brief.py wheat --facts    (fact dict + brief)
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -331,11 +335,73 @@ def build_template_brief(f: dict) -> str:
     return "\n".join(lines)
 
 
-def build_llm_brief(facts: dict) -> str:
-    """Claude writes the brief from the fact dict alone. Raises on any API
-    failure — the caller decides to fall back, never silently. No sampling
-    parameters are sent (current Claude models reject them); grounding comes
-    from the system prompt and the facts-only input."""
+# Numbers a brief may use without them appearing in the facts: share scale
+# ("/100", "100%"), the "<1%" floor, and the 12 of "rolling 12-month".
+STRUCTURAL_NUMBERS = {0.0, 1.0, 12.0, 100.0}
+_NUM_TOKEN = re.compile(r"\d{4}-\d{2}|\d+(?:\.\d+)?")
+
+
+def _collect_fact_values(obj, nums: set, period_tokens: set) -> None:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == "hs_code":  # identifier, not a quantity — must not
+                continue        # vouch for nearby fabricated numbers
+            _collect_fact_values(v, nums, period_tokens)
+    elif isinstance(obj, (list, tuple)):
+        for v in obj:
+            _collect_fact_values(v, nums, period_tokens)
+    elif isinstance(obj, bool):
+        return
+    elif isinstance(obj, (int, float)):
+        v = float(obj)
+        # The scalings the brief legitimately applies: shares → %,
+        # USD → millions/billions, tonne-scale conversions.
+        for scaled in (v, v * 100, v / 1e6, v / 1e9, v / 1e3):
+            nums.add(abs(scaled))
+    elif isinstance(obj, str):
+        for tok in _NUM_TOKEN.findall(obj):
+            if "-" in tok:  # 'YYYY-MM' period — keep whole, allow bare year too
+                period_tokens.add(tok)
+                nums.add(float(tok[:4]))
+            else:
+                nums.add(abs(float(tok)))
+
+
+def verify_grounding(text: str, facts: dict) -> int:
+    """Every number in the brief must trace to the fact dict, within the
+    rounding the brief is allowed to apply (a token with d decimals may be
+    off by half a unit in its last decimal, or 1.5% for round-number
+    phrasing). Returns the count of numbers checked; raises ValueError
+    naming the untraceable ones otherwise — the caller falls back to the
+    deterministic template, so a fabricated number can never be displayed."""
+    nums, period_tokens = set(), set()
+    _collect_fact_values(facts, nums, period_tokens)
+    allowed = nums | STRUCTURAL_NUMBERS
+    checked, untraced = 0, []
+    for tok in _NUM_TOKEN.findall(text.replace(",", "")):
+        checked += 1
+        if "-" in tok:
+            if tok not in period_tokens:
+                untraced.append(tok)
+            continue
+        x = float(tok)
+        decimals = len(tok.partition(".")[2])
+        tol = max(0.51 * 10 ** -decimals, 0.015 * x)
+        if not any(abs(a - x) <= tol for a in allowed):
+            untraced.append(tok)
+    if untraced:
+        raise ValueError(
+            f"grounding check failed — numbers not traceable to the fact "
+            f"dict: {sorted(set(untraced))}")
+    return checked
+
+
+def build_llm_brief(facts: dict) -> tuple[str, int]:
+    """Claude writes the brief from the fact dict alone; the result must
+    pass verify_grounding before it is returned. Raises on any API failure
+    or grounding violation — the caller decides to fall back, never
+    silently. No sampling parameters are sent (current Claude models reject
+    them). Returns (text, numbers_traced)."""
     import anthropic  # lazy import — template mode must work without the SDK
 
     client = anthropic.Anthropic(api_key=get_anthropic_key())
@@ -360,7 +426,7 @@ def build_llm_brief(facts: dict) -> str:
         text = HEADER_LINE + "\n" + text
     if SIGNOFF_LINE not in text:
         text += "\n\n" + SIGNOFF_LINE
-    return text
+    return text, verify_grounding(text, facts)
 
 
 def generate_brief(facts: dict, force_template: bool = False) -> tuple[str, str, str]:
@@ -373,10 +439,13 @@ def generate_brief(facts: dict, force_template: bool = False) -> tuple[str, str,
         return (build_template_brief(facts), "template",
                 "no ANTHROPIC_API_KEY configured")
     try:
-        return build_llm_brief(facts), "llm", get_brief_model()
+        text, traced = build_llm_brief(facts)
+        return (text, "llm",
+                f"{get_brief_model()} · grounding check passed "
+                f"({traced} numbers traced to the fact dict)")
     except Exception as exc:
         return (build_template_brief(facts), "template",
-                f"LLM call failed: {exc}")
+                f"LLM output rejected: {exc}")
 
 
 # ---------------------------------------------------------------- CLI
