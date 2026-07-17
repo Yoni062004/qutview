@@ -13,6 +13,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from common import COMMODITIES, DB_PATH  # noqa: E402
 from brief.corridor_brief import assemble_facts, generate_brief  # noqa: E402
+from features.alerts import compute_alerts  # noqa: E402
 
 st.set_page_config(page_title="QUTVIEW — Food Corridor Risk", layout="wide")
 
@@ -69,6 +70,63 @@ uae_max_year = load(
     "SELECT max(year) AS y FROM risk_scores WHERE source = 'uae_reported'"
 )["y"].iloc[0]
 
+data_stamp = str(load("SELECT coalesce(max(loaded_at), '') AS s FROM data_source")["s"].iloc[0])
+
+
+# ---------------- active alerts ----------------
+@st.cache_data(ttl=300)
+def load_alerts(stamp: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        return compute_alerts(conn)
+
+
+def _jump_to(commodity_id: str) -> None:
+    st.session_state["commodity_detail"] = commodity_id
+
+
+alerts = load_alerts(data_stamp)
+high_alerts = [a for a in alerts if a["severity"] == "high"]
+watch_alerts = [a for a in alerts if a["severity"] == "watch"]
+
+if alerts:
+    st.subheader(f"Active alerts — {len(high_alerts)} high · {len(watch_alerts)} watch")
+    if high_alerts:
+        st.error("\n\n".join(
+            f"🔴 **{a['name']}** · {a['rule'].replace('_', ' ')} — {a['message']}"
+            for a in high_alerts))
+        # Watch level stays one click away so a page with real alarms is
+        # still readable, and a page with only watch items stays calm.
+        with st.expander(f"🟠 Watch-level alerts ({len(watch_alerts)})",
+                         expanded=False):
+            for a in watch_alerts:
+                st.markdown(f"🟠 **{a['name']}** · {a['rule'].replace('_', ' ')} — "
+                            f"{a['message']}")
+    elif watch_alerts:
+        with st.expander(f"🟠 Watch-level alerts ({len(watch_alerts)}) — "
+                         f"no high alerts", expanded=False):
+            for a in watch_alerts:
+                st.markdown(f"🟠 **{a['name']}** · {a['rule'].replace('_', ' ')} — "
+                            f"{a['message']}")
+
+    # One click to the corridor's detail + A1 brief below (which carry the
+    # why and the recommended action — not duplicated here).
+    alerted = []
+    for a in alerts:  # already sorted high-first
+        if a["commodity"] not in [c for c, _, _ in alerted]:
+            alerted.append((a["commodity"], a["name"], a["severity"]))
+    cols = st.columns(max(len(alerted), 1))
+    for col, (acid, aname, asev) in zip(cols, alerted):
+        col.button(("🔴 " if asev == "high" else "🟠 ") + aname,
+                   key=f"jump_{acid}", on_click=_jump_to, args=(acid,),
+                   help="Show this corridor's detail and brief below",
+                   use_container_width=True)
+    st.caption("Standing alerts from current data (stateless). Buttons open the "
+               "corridor's detail and draft brief below.")
+else:
+    st.caption("No active alerts on current data.")
+
+st.divider()
+
 # ---------------- overview risk cards ----------------
 st.subheader("Corridor risk overview — latest available year per corridor")
 PER_ROW = 4
@@ -124,6 +182,7 @@ cid = st.selectbox(
     "Commodity detail",
     list(COMMODITIES),
     format_func=lambda c: COMMODITIES[c]["name"],
+    key="commodity_detail",
 )
 detail = risks[risks["commodity_id"] == cid].iloc[0]
 detail_year = int(detail.year)
@@ -280,8 +339,7 @@ def cached_brief(commodity_id: str, data_stamp: str):
     return generate_brief(facts)
 
 
-data_stamp = load("SELECT coalesce(max(loaded_at), '') AS s FROM data_source")["s"].iloc[0]
-brief_text, brief_mode, brief_detail = cached_brief(cid, str(data_stamp))
+brief_text, brief_mode, brief_detail = cached_brief(cid, data_stamp)
 
 badge = ("🤖 LLM-GENERATED · " + brief_detail if brief_mode == "llm"
          else "📋 TEMPLATE (deterministic, no AI) · " + brief_detail)
