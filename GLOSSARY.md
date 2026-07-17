@@ -15,6 +15,7 @@ Each entry is one or two sentences, tied back to the project where it helps.
 - **Commodity** — a raw, interchangeable good traded in bulk: wheat, coffee, gold, sugar. One ton of a grade is the same as any other, so price is set globally.
 - **Corridor** — a trade route between two countries for one good. "The UAE–Russia wheat corridor" = wheat flowing from Russia to the UAE. QUTVIEW scores these.
 - **Concentration** — how much of something depends on one source. High concentration = fragile (one disruption hurts). **Diversification** is the opposite and the cure.
+- **Top-origin shift** — when the biggest supplier *changes country* year-over-year (Ukraine → Türkiye for sunflower oil). Different risk story than one supplier growing its share — QUTVIEW alerts on the two separately so a supply-base change is never misread as concentration.
 - **HHI (Herfindahl-Hirschman Index)** — the 0-to-1 number that *measures* concentration. Near 1 = one supplier dominates (dangerous); near 0 = spread across many (safe). QUTVIEW's core risk metric.
 - **Import dependency** — the share of a good a country must buy from abroad because it can't produce enough itself. The UAE is ~85–90% import-dependent on food.
 - **Net importer / net exporter** — a country that buys more of something than it sells (UAE, food) vs. sells more than it buys (Ethiopia, coffee/gold). The risk *flips meaning* depending on which one you analyze.
@@ -51,6 +52,7 @@ Each entry is one or two sentences, tied back to the project where it helps.
 - **Confidence interval (90% interval)** — the shaded band around a forecast: "we're 90% sure the real value lands in here." Honesty about uncertainty.
 - **Star schema** — a clean database layout: one central "fact" table (the events) linked to "dimension" tables (the labels). How the SQLite database is organized.
 - **Descriptive → diagnostic → predictive → prescriptive** — the four "rungs" of analytics: *what happened → why → what's coming → what to do*. Value roughly triples each rung. QUTVIEW is climbing to rung 4.
+- **Alert fatigue / signal dilution** — when a system flags so much that people stop listening (the boy who cried wolf). Why QUTVIEW's alert thresholds are tuned so the safest corridors stay silent — an alert feed people trust beats one they mute.
 - **LLM (Large Language Model)** — the AI that turns data tables into written analysis. The engine of the "generative brief" feature.
 - **Grounding** — forcing an AI to use *only* your real data, not its imagination. Prevents made-up numbers. QUTVIEW enforces it mechanically: every number in an LLM brief must trace back to a database value, or the whole output is rejected and the offline template is shown instead — with the reason on the badge.
 - **Hallucination** — when an AI confidently states something false. Grounding is the defense; avoiding it is the whole pitch.
