@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common import COMMODITIES, get_connection
-from brief.corridor_brief import assemble_facts
+from brief.corridor_brief import assemble_facts, concentration_driver_note
 
 # Thresholds — named so they can be tuned and defended, not buried in logic.
 CONCENTRATION_HIGH = 0.80   # top-origin share: one supplier is 4/5 of supply,
@@ -103,8 +103,12 @@ def compute_alerts(conn) -> list[dict]:
         # Rule 4 — top-origin share up meaningfully year-over-year. Only an
         # honest "concentration climbing" when it is the SAME supplier both
         # years; if the top origin changed, that is a supply-base shift and
-        # must not be phrased as one supplier concentrating.
+        # must not be phrased as one supplier concentrating. The A4 driver line
+        # carries the arithmetic "why" (and the reporting-lag correction), so
+        # the alert never implies a story the decomposition falsifies.
         p = facts["risk_previous"]
+        driver = concentration_driver_note(facts)
+        driver_suffix = f" — {driver}" if driver else ""
         if p and p.get("top_origin_share") is not None:
             delta = share - p["top_origin_share"]
             if delta >= YOY_SHARE_RISE_PTS:
@@ -116,7 +120,7 @@ def compute_alerts(conn) -> list[dict]:
                         f"{p['top_origin_share']*100:.0f}% ({p['top_origin']}, "
                         f"{p['year']}) - +{delta*100:.0f} pts "
                         f"(threshold +{YOY_SHARE_RISE_PTS*100:.0f}) "
-                        f"[{tag} {r['year']}]",
+                        f"[{tag} {r['year']}]{driver_suffix}",
                         delta * 100))
                 else:
                     alerts.append(_alert(
@@ -124,8 +128,8 @@ def compute_alerts(conn) -> list[dict]:
                         f"top origin shifted from {p['top_origin']} "
                         f"({p['top_origin_share']*100:.0f}%, {p['year']}) to "
                         f"{r['top_origin']} ({share*100:.0f}%, {r['year']}) - "
-                        f"supply-base change, not one supplier concentrating "
-                        f"[{tag} {r['year']}]",
+                        f"a top-origin change (not one supplier concentrating) "
+                        f"[{tag} {r['year']}]{driver_suffix}",
                         delta * 100))
 
     alerts.sort(key=lambda a: (SEVERITY_ORDER[a["severity"]], -a["score"]))

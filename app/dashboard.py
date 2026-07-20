@@ -324,6 +324,54 @@ with right:
             f"top origin. Shown honestly instead of guessed."
         )
 
+# ---------------- what moved (A4) ----------------
+@st.cache_data(ttl=300)
+def load_drivers(commodity_id: str, stamp: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        return assemble_facts(conn, commodity_id)["drivers"]
+
+
+def render_what_moved(drivers: dict) -> None:
+    mo, fd = drivers["price_momentum"], drivers["flow_decomposition"]
+    if mo:
+        m6, m12 = mo["m6_pct"], mo["m12_pct"]
+        extra = f", {m12:+.1f}% over 12 months" if m12 is not None else ""
+        st.markdown(f"**World price momentum:** {mo['class_6mo']} — "
+                    f"{m6:+.1f}% over 6 months{extra}")
+        st.caption("Context only — a price move *accompanies* corridor stress; it is "
+                   "not asserted as the cause of the concentration.")
+    if fd:
+        inc = fd["incumbent"]
+        inc_txt = ""
+        if inc and inc["change_pct"] is not None:
+            inc_txt = (f"incumbent {inc['origin']} {inc['change_pct']:+.0f}% "
+                       f"(${inc['prev_value']/1e6:.0f}M→${inc['latest_value']/1e6:.0f}M)")
+        gains = []
+        for m in fd["risers"][:2]:
+            pct = f"{m['change_pct']:+.0f}%" if m["change_pct"] is not None else "new"
+            gains.append(f"{m['origin']} {pct} (+${m['change_usd']/1e6:.0f}M)")
+        st.markdown(f"**Flow attribution ({fd['prev_year']}→{fd['latest_year']} supply "
+                    f"mix):** " + inc_txt
+                    + (("; top gains: " + ", ".join(gains)) if gains else ""))
+        unrep = fd["unreported"]
+        if unrep:
+            named = ", ".join(o["origin"] for o in unrep["origins"][:3])
+            named_val = sum(o["prev_value"] for o in unrep["origins"][:3])
+            st.warning(
+                f"**Reporting-lag guard:** {unrep['count']} origins "
+                f"(${unrep['prev_value_usd']/1e6:.0f}M in {fd['prev_year']}) have no "
+                f"{fd['latest_year']} data yet — including {named} "
+                f"(${named_val/1e6:.0f}M of the ${unrep['prev_value_usd']/1e6:.0f}M). "
+                f"Excluded from decline attribution as likely reporting lag, not real "
+                f"exits — so an apparent concentration rise or origin shift here is "
+                f"provisional.")
+
+
+st.divider()
+st.subheader("What moved")
+render_what_moved(load_drivers(cid, data_stamp))
+
+
 # ---------------- diversification candidates (A3) ----------------
 @st.cache_data(ttl=300)
 def load_alternatives(commodity_id: str, stamp: str):

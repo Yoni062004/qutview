@@ -75,11 +75,22 @@ is reconstructed from mirror statistics and the brief must say so; if the \
 mirror gate did not pass and newer_mirror_years_unscored is non-empty, \
 explain that newer years exist in mirror data but are deliberately not \
 scored because coverage is below the threshold.
+- "What moved" framing (drivers section): price_momentum is CONTEXT — phrase \
+it as "accompanied by" or "alongside" a price move, NEVER "because of". \
+Correlation is not causation. flow_decomposition is ARITHMETIC ATTRIBUTION \
+within our own trade data — "driven by" is acceptable but scope it strictly \
+to the supply mix / share, never to world events. If \
+flow_decomposition.unreported is present, the origins there dropped to $0 \
+because they have not reported the latest year yet (reporting lag) — say so; \
+do NOT describe them as having fallen, collapsed, or exited. NEVER speculate \
+about real-world causes (war, drought, sanctions, policy): report only what \
+moved in the numbers and let the human analyst supply the world.
 - Format, plain text only (no markdown):
   line 1 exactly: {HEADER_LINE}
-  then a brief of at most 180 words covering risk posture (with the \
+  then a brief of at most 200 words covering risk posture (with the \
 previous-year comparison), origin concentration and supply mix, import \
-dependency, and price/forecast.
+dependency, price/forecast, and one "What moved" observation from the \
+drivers section under the framing rules above.
   then one line starting "Recommended for review:" with ONE concrete action \
 grounded in the data — name the numbers that justify it, no vague advice.
   then one line starting "Confidence & caveats:" including the forecast \
@@ -91,6 +102,16 @@ ALT_MEANINGFUL_SHARE = 0.01  # a candidate must supply >= 1% of the latest year
                              # to count as a proven corridor, not a one-off
 ALT_MAX_CANDIDATES = 5       # cap the shortlist
 ALT_TREND_BAND = 0.15        # +/-15% relative move vs earlier years = rising/falling
+
+# "Why it moved" drivers (A4) — price-momentum classification of the trailing
+# 6-month world-price move. Context only: a price move accompanies corridor
+# stress, it is not asserted as its cause.
+MOM_SHARP_RISE = 0.15   # >= +15% over 6 months
+MOM_RISE = 0.05         # >= +5%
+MOM_FALL = -0.05        # <= -5%
+MOM_SHARP_FALL = -0.15  # <= -15%
+MOM_12MO_MATERIAL = 0.10  # a 12-month move worth flagging as context when 6mo is flat
+FLAT_INCUMBENT_PCT = 5    # |incumbent value change| under this = "roughly flat"
 
 # ---------------------------------------------------------------- layer 1
 
@@ -198,6 +219,107 @@ def _build_alternatives(conn, cid, flows_table, latest_year, top_origin, total_v
     }
 
 
+def _shift_period(period, months):
+    y, m = int(period[:4]), int(period[5:7])
+    idx = y * 12 + (m - 1) - months
+    return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
+
+
+def _classify_momentum(frac):
+    if frac is None:
+        return None
+    if frac >= MOM_SHARP_RISE:
+        return "sharp rise"
+    if frac >= MOM_RISE:
+        return "rising"
+    if frac <= MOM_SHARP_FALL:
+        return "sharp fall"
+    if frac <= MOM_FALL:
+        return "falling"
+    return "stable"
+
+
+def _price_momentum(conn, cid):
+    """Trailing 3/6/12-month % change in the world price — pure arithmetic on
+    stored prices. Context signal only (see the framing rules)."""
+    prices = dict(conn.execute(
+        "SELECT period, price FROM fact_prices WHERE commodity_id = ?", (cid,)).fetchall())
+    if not prices:
+        return None
+    latest_p = max(prices)
+    latest_v = prices[latest_p]
+    out = {"latest_period": latest_p, "latest_price": latest_v}
+    for n in (3, 6, 12):
+        ref_v = prices.get(_shift_period(latest_p, n))
+        out[f"m{n}_pct"] = (100 * (latest_v - ref_v) / ref_v) if ref_v else None
+    six = out["m6_pct"]
+    out["class_6mo"] = _classify_momentum(six / 100 if six is not None else None)
+    return out
+
+
+def _flow_decomposition(conn, cid, flows_table, latest_year, provisional, top_origin):
+    """Arithmetic attribution of the value change per origin, latest data year
+    vs the previous year in the SAME flows table (so provenance is consistent).
+    On a provisional/mirror year the $0-drop guard applies: origins present in
+    the prior year but at exactly $0 in the latest year are excluded from
+    faller attribution and disclosed separately as likely reporting lag, not
+    counted as real declines."""
+    prev_row = conn.execute(
+        f"SELECT max(year) FROM {flows_table} WHERE commodity_id = ? AND year < ?",
+        (cid, latest_year)).fetchone()
+    prev_year = prev_row[0]
+    if prev_year is None:
+        return None
+    rows = conn.execute(
+        f"""SELECT c.name, f.year, f.trade_value_usd FROM {flows_table} f
+            JOIN dim_country c ON c.country_code = f.origin_code
+            WHERE f.commodity_id = ? AND f.year IN (?, ?) AND f.trade_value_usd > 0""",
+        (cid, latest_year, prev_year)).fetchall()
+    by_origin = {}
+    for name, year, value in rows:
+        by_origin.setdefault(name, {})[year] = value
+
+    def mover(name):
+        yv = by_origin[name]
+        prev_v, latest_v = yv.get(prev_year, 0.0), yv.get(latest_year, 0.0)
+        return {
+            "origin": name, "prev_value": prev_v, "latest_value": latest_v,
+            "change_usd": latest_v - prev_v,
+            "change_pct": (100 * (latest_v - prev_v) / prev_v) if prev_v else None,
+        }
+
+    movers = [mover(n) for n in by_origin]
+
+    # $0-drop guard (provisional years only).
+    unreported = None
+    if provisional:
+        drops = [m for m in movers if m["latest_value"] == 0 and m["prev_value"] > 0]
+        if drops:
+            drops.sort(key=lambda m: -m["prev_value"])
+            unreported = {
+                "count": len(drops),
+                "prev_value_usd": sum(m["prev_value"] for m in drops),
+                "origins": [{"origin": m["origin"], "prev_value": m["prev_value"]}
+                            for m in drops[:5]],
+            }
+        zero_drop = {m["origin"] for m in drops}
+    else:
+        zero_drop = set()
+
+    risers = sorted((m for m in movers if m["change_usd"] > 0),
+                    key=lambda m: -m["change_usd"])[:3]
+    fallers = sorted((m for m in movers
+                      if m["change_usd"] < 0 and m["origin"] not in zero_drop),
+                     key=lambda m: m["change_usd"])[:3]
+    incumbent = next((m for m in movers if m["origin"] == top_origin), None)
+    return {
+        "latest_year": latest_year, "prev_year": prev_year,
+        "provisional": provisional,
+        "incumbent": incumbent, "risers": risers, "fallers": fallers,
+        "unreported": unreported,
+    }
+
+
 def assemble_facts(conn, cid: str) -> dict:
     """Every number the brief may use, from the DB, with gaps recorded.
     Deterministic, no AI, no derived guesses beyond arithmetic."""
@@ -255,6 +377,15 @@ def assemble_facts(conn, cid: str) -> dict:
         conn, cid, flows_table, latest["year"],
         latest["top_origin"], total_value)
 
+    momentum_price = _price_momentum(conn, cid)
+    if momentum_price is None:
+        gaps.append("no price series for momentum")
+    flow_decomp = _flow_decomposition(
+        conn, cid, flows_table, latest["year"],
+        latest["source"] == "mirror_derived", latest["top_origin"])
+    if flow_decomp is None:
+        gaps.append("no previous year to decompose flow changes against")
+
     dependency = _row(conn, """SELECT year, dependency_pct, import_kt, production_kt
                                FROM dependency_ratios
                                WHERE commodity_id = ? AND dependency_pct IS NOT NULL
@@ -304,6 +435,8 @@ def assemble_facts(conn, cid: str) -> dict:
         "top_origins": top_origins,
         "total_import_value_usd": total_value,
         "alternatives": alternatives,
+        "drivers": {"price_momentum": momentum_price,
+                    "flow_decomposition": flow_decomp},
         "dependency": dependency,
         "exposure_adjusted_risk": exposure_adjusted,
         "latest_price": price,
@@ -330,6 +463,97 @@ def assemble_facts(conn, cid: str) -> dict:
 def _pct(share: float) -> str:
     """Format a 0..1 share; tiny-but-real origins read '<1%', never '0%'."""
     return "<1%" if share < 0.005 else f"{share*100:.0f}%"
+
+
+def _m(value_usd) -> str:
+    return f"{value_usd/1e6:.0f}M"
+
+
+def concentration_driver_note(f: dict):
+    """Short arithmetic driver behind a concentration change, honest about the
+    $0-drop reporting-lag effect. Shared by the brief and the alert feed so
+    they never tell different stories. None when no decomposition exists."""
+    fd = f["drivers"]["flow_decomposition"]
+    if not fd:
+        return None
+    inc, unrep = fd["incumbent"], fd["unreported"]
+    prev = f["risk_previous"]
+    unrep_prev = ({o["origin"]: o["prev_value"] for o in unrep["origins"]}
+                  if unrep else {})
+
+    # Case 1 — the PREVIOUS top origin is itself unreported: the apparent
+    # top-origin shift is substantially reporting lag, not a real supply-base
+    # change. (Sunflower: Ukraine 2024 top, no 2025 data yet.)
+    if prev and prev.get("top_origin") in unrep_prev:
+        po = prev["top_origin"]
+        riser = ""
+        if fd["risers"]:
+            r0 = fd["risers"][0]
+            rp = f"+{r0['change_pct']:.0f}%" if r0["change_pct"] is not None else "new supplier"
+            riser = (f"; real growth is {r0['origin']} {rp} "
+                     f"(+${_m(r0['change_usd'])}) among reporting origins")
+        return (f"the previous top origin {po} (${_m(unrep_prev[po])} in "
+                f"{fd['prev_year']}) has no {fd['latest_year']} data yet — likely "
+                f"reporting lag, so the apparent shift is provisional{riser}")
+
+    inc_flat = (inc and inc["change_pct"] is not None
+                and abs(inc["change_pct"]) < FLAT_INCUMBENT_PCT)
+    if inc_flat and unrep:
+        # Case 2 — Poultry: share rose but the incumbent was flat, so the rise
+        # is the shrinking denominator from origins that have not reported yet.
+        return (f"{inc['origin']}'s value was roughly flat "
+                f"({_m(inc['prev_value'])}->{_m(inc['latest_value'])}); the share rise "
+                f"reflects {unrep['count']} origins (${_m(unrep['prev_value_usd'])} in "
+                f"{fd['prev_year']}) with no {fd['latest_year']} data yet — likely "
+                f"reporting lag, not real movement")
+    bits = []
+    if fd["risers"]:
+        r0 = fd["risers"][0]
+        rp = f"+{r0['change_pct']:.0f}%" if r0["change_pct"] is not None else "new supplier"
+        bits.append(f"{r0['origin']} {rp} (+${_m(r0['change_usd'])})")
+    if inc and inc["change_pct"] is not None and inc["change_pct"] <= -FLAT_INCUMBENT_PCT:
+        bits.append(f"{inc['origin']} {inc['change_pct']:+.0f}%")
+    # Anchor the flow window explicitly so the (possibly older) data-year change
+    # is never conflated with the current-month price momentum beside it.
+    note = ("driven by " + ", ".join(bits)
+            + f" in the {fd['prev_year']}->{fd['latest_year']} supply mix") if bits else None
+    if unrep:
+        lag = (f"{unrep['count']} origins (${_m(unrep['prev_value_usd'])} in "
+               f"{fd['prev_year']}) report no {fd['latest_year']} data yet (likely "
+               f"reporting lag)")
+        note = f"{note}; {lag}" if note else lag
+    return note
+
+
+def _momentum_context(mo) -> str | None:
+    """Price-momentum phrased as CONTEXT ('accompanied by'), never cause."""
+    if not mo:
+        return None
+    cls, m6, m12 = mo["class_6mo"], mo["m6_pct"], mo["m12_pct"]
+    if cls in ("sharp rise", "rising", "sharp fall", "falling"):
+        extra = (f", {m12:+.0f}% over 12 months"
+                 if m12 is not None and abs(m12) >= MOM_SHARP_RISE * 100 else "")
+        return f"accompanied by a {m6:+.0f}% 6-month price move ({cls}{extra})"
+    if m12 is not None and abs(m12) >= MOM_12MO_MATERIAL * 100:
+        return (f"the 6-month price was broadly stable but moved {m12:+.0f}% over 12 "
+                f"months (price context, not a driver of concentration)")
+    return "the world price was broadly stable"
+
+
+def _what_moved(f: dict) -> str | None:
+    """One 'What moved' line: arithmetic attribution + price context, kept to
+    the 1-2 most material facts. Attribution is scoped to the supply mix;
+    momentum is context only."""
+    clauses = []
+    note = concentration_driver_note(f)
+    if note:
+        clauses.append(note)
+    ctx = _momentum_context(f["drivers"]["price_momentum"])
+    if ctx:
+        clauses.append(ctx)
+    if not clauses:
+        return None
+    return "; ".join(clauses) + "."
 
 
 def _pick_action(f: dict) -> str:
@@ -418,6 +642,10 @@ def build_template_brief(f: dict) -> str:
         lines += [f"Price: {f['latest_price']['price']:.2f} {f['commodity']['price_unit']} "
                   f"({f['latest_price']['period']}); 6-month forecast {f['forecast']['direction']} "
                   f"({f['forecast']['pct_vs_latest_price']:+.1f}% by {f['forecast']['end_period']})."]
+
+    moved = _what_moved(f)
+    if moved:
+        lines += [f"What moved: {moved}"]
 
     gate = prov["mirror_gate"]
     if prov["provisional"] and gate:
