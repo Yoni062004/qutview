@@ -86,6 +86,12 @@ grounded in the data — name the numbers that justify it, no vague advice.
 backtest MAPE, the annual mirror coverage, and any gaps.
   last line exactly: {SIGNOFF_LINE}"""
 
+# Alternative-sourcing (A3) tuning — named, not magic numbers in logic.
+ALT_MEANINGFUL_SHARE = 0.01  # a candidate must supply >= 1% of the latest year
+                             # to count as a proven corridor, not a one-off
+ALT_MAX_CANDIDATES = 5       # cap the shortlist
+ALT_TREND_BAND = 0.15        # +/-15% relative move vs earlier years = rising/falling
+
 # ---------------------------------------------------------------- layer 1
 
 
@@ -95,6 +101,101 @@ def _row(conn, query, params=()):
     if row is None:
         return None
     return dict(zip([c[0] for c in cur.description], row))
+
+
+def _implied_unit_value(value, weight):
+    """Trade value / shipped weight for one origin-year, in USD/kg. NOT a
+    landed cost and NOT a price — product mix differs by origin, so it is
+    only an honest like-for-like comparison basis. None when weight is
+    missing or zero."""
+    if value and weight and weight > 0:
+        return value / weight
+    return None
+
+
+def _build_alternatives(conn, cid, flows_table, latest_year, top_origin, total_value):
+    """Rank NON-top origins already shipping to the UAE as diversification
+    candidates, from real trade rows only. Ranking rule (transparent, no
+    black box): years_present desc, then latest-year share desc. Candidates
+    below ALT_MEANINGFUL_SHARE are dropped; if none remain, that absence is
+    itself the finding. Hypothetical suppliers with no UAE trade rows are
+    out of scope (needs global-export data — a future step)."""
+    rows = conn.execute(
+        f"""SELECT c.name, f.year, f.trade_value_usd, f.net_weight_kg
+            FROM {flows_table} f JOIN dim_country c ON c.country_code = f.origin_code
+            WHERE f.commodity_id = ? AND f.trade_value_usd > 0""", (cid,)).fetchall()
+
+    year_totals, per_origin = {}, {}
+    for name, year, value, weight in rows:
+        year_totals[year] = year_totals.get(year, 0) + value
+        per_origin.setdefault(name, {})[year] = (value, weight)
+    total_years = len(year_totals)
+
+    def share_in(year, value):
+        t = year_totals.get(year, 0)
+        return value / t if t else 0.0
+
+    def trend_for(name):
+        # Latest-year share vs the mean of earlier years this origin shipped.
+        yv = per_origin[name]
+        latest = yv.get(latest_year)
+        if latest is None:
+            return "absent in latest year"
+        prior = [share_in(y, v) for y, (v, _) in yv.items() if y < latest_year]
+        if not prior:
+            return "new (first appearance)"
+        cur = share_in(latest_year, latest[0])
+        mean_prior = sum(prior) / len(prior)
+        if mean_prior == 0:
+            return "new (first appearance)"
+        if cur >= mean_prior * (1 + ALT_TREND_BAND):
+            return "rising"
+        if cur <= mean_prior * (1 - ALT_TREND_BAND):
+            return "falling"
+        return "stable"
+
+    candidates = []
+    for name, yv in per_origin.items():
+        if name == top_origin or latest_year not in yv:
+            continue
+        value, weight = yv[latest_year]
+        share = value / total_value if total_value else 0.0
+        if share < ALT_MEANINGFUL_SHARE:
+            continue
+        candidates.append({
+            "origin": name,
+            "share": share,
+            "value_usd": value,
+            "years_present": sum(1 for _ in yv),
+            "total_years": total_years,
+            "trend": trend_for(name),
+            "implied_unit_value_usd_per_kg": _implied_unit_value(value, weight),
+        })
+    candidates.sort(key=lambda c: (-c["years_present"], -c["share"]))
+    candidates = candidates[:ALT_MAX_CANDIDATES]
+
+    # Incumbent on the same honest basis, so candidates can be compared.
+    incumbent = None
+    top_yv = per_origin.get(top_origin, {}).get(latest_year)
+    if top_yv:
+        tv, tw = top_yv
+        incumbent = {
+            "origin": top_origin,
+            "share": tv / total_value if total_value else 0.0,
+            "implied_unit_value_usd_per_kg": _implied_unit_value(tv, tw),
+        }
+
+    return {
+        "candidates": candidates,
+        "incumbent": incumbent,
+        "total_years": total_years,
+        "has_alternatives": bool(candidates),
+        "note": (None if candidates else
+                 "no proven alternative corridor exists in current trade data "
+                 "(all other origins under 1% of the latest year)"),
+        "unit_value_caveat": ("implied unit value = trade value / shipped weight; "
+                              "NOT landed cost — product mix differs by origin"),
+    }
 
 
 def assemble_facts(conn, cid: str) -> dict:
@@ -150,6 +251,9 @@ def assemble_facts(conn, cid: str) -> dict:
         {"origin": name, "value_usd": value, "share": value / total_value}
         for name, value in origin_rows[:5]
     ]
+    alternatives = _build_alternatives(
+        conn, cid, flows_table, latest["year"],
+        latest["top_origin"], total_value)
 
     dependency = _row(conn, """SELECT year, dependency_pct, import_kt, production_kt
                                FROM dependency_ratios
@@ -199,6 +303,7 @@ def assemble_facts(conn, cid: str) -> dict:
         "monthly_trend": monthly,
         "top_origins": top_origins,
         "total_import_value_usd": total_value,
+        "alternatives": alternatives,
         "dependency": dependency,
         "exposure_adjusted_risk": exposure_adjusted,
         "latest_price": price,
@@ -243,10 +348,19 @@ def _pick_action(f: dict) -> str:
                 f"be confirmed from trade data for "
                 f"{'/'.join(str(y) for y in f['provenance']['newer_mirror_years_unscored'])}.")
     if top and top["share"] >= 0.60:
-        return (f"Qualify a second origin for {f['commodity']['name'].lower()} — "
+        alts = f["alternatives"]
+        lead = (f"Qualify a second origin for {f['commodity']['name'].lower()} — "
                 f"{top['origin']} supplied {top['share']*100:.0f}% of "
                 f"{r['year']} import value (${top['value_usd']/1e6:.0f}M), a single-source "
                 f"exposure across {r['n_origins']} total origins.")
+        if alts["has_alternatives"]:
+            named = "; ".join(
+                f"{c['origin']} ({_pct(c['share'])} share, present "
+                f"{c['years_present']}/{c['total_years']} years)"
+                for c in alts["candidates"][:3])
+            return lead + f" Candidates from existing trade: {named}."
+        return lead + " No proven alternative corridor exists in current trade data " \
+                      "(all other origins under 1%)."
     if (f["monthly_trend"] and f["monthly_trend"]["direction"] == "rising"
             and r["composite_risk"] >= 50):
         return (f"Escalate monitoring: composite risk is {r['composite_risk']:.0f}/100 and "

@@ -324,6 +324,58 @@ with right:
             f"top origin. Shown honestly instead of guessed."
         )
 
+# ---------------- diversification candidates (A3) ----------------
+@st.cache_data(ttl=300)
+def load_alternatives(commodity_id: str, stamp: str):
+    with sqlite3.connect(DB_PATH) as conn:
+        return assemble_facts(conn, commodity_id)["alternatives"]
+
+
+alts = load_alternatives(cid, data_stamp)
+has_single_source = any(
+    a["commodity"] == cid and a["rule"] == "single_source" for a in alerts)
+
+
+def render_alternatives(alts: dict, mirror: bool) -> None:
+    inc = alts["incumbent"]
+    if inc:
+        iuv = inc["implied_unit_value_usd_per_kg"]
+        st.caption(
+            f"Incumbent: **{inc['origin']}** at {inc['share']*100:.0f}% of supply"
+            + (f" · implied unit value {iuv:.2f} USD/kg" if iuv is not None else ""))
+    if not alts["has_alternatives"]:
+        st.warning(f"**Finding:** {alts['note']}. This corridor cannot be "
+                   f"diversified from origins already in the trade data.")
+        return
+    tag = " *(provisional, mirror-derived)*" if mirror else ""
+    table = pd.DataFrame([{
+        "Origin": c["origin"],
+        "Share": f"{c['share']*100:.0f}%",
+        "Years present": f"{c['years_present']}/{c['total_years']}",
+        "Trend": c["trend"],
+        "Implied unit value (USD/kg)†": (
+            f"{c['implied_unit_value_usd_per_kg']:.2f}"
+            if c["implied_unit_value_usd_per_kg"] is not None else "n/a"),
+    } for c in alts["candidates"]])
+    st.markdown(f"**Diversification candidates — origins already shipping to the "
+                f"UAE{tag}**")
+    st.dataframe(table, width="stretch", hide_index=True)
+    st.caption(f"† {alts['unit_value_caveat']}. A candidate can look cheaper purely "
+               f"because it ships a different product mix — not a price promise, "
+               f"not landed cost (freight/duties are roadmap). Candidates are proven "
+               f"corridors (>=1% of the latest year); hypothetical suppliers with no "
+               f"UAE trade need global-export data (future step).")
+
+
+st.divider()
+st.subheader("Diversification candidates")
+if has_single_source:
+    render_alternatives(alts, detail_mirror)
+else:
+    with st.expander("Show alternative-sourcing candidates for this corridor",
+                     expanded=False):
+        render_alternatives(alts, detail_mirror)
+
 # ---------------- generated intelligence brief ----------------
 st.divider()
 st.subheader("Generated intelligence brief")
