@@ -1,9 +1,11 @@
 # QUTVIEW — Sovereign Food-Corridor Risk Intelligence (Prototype)
 
 Early-warning risk intelligence for the UAE's strategic food import corridors.
-Tracks five staple commodities (wheat, rice, palm oil, sugar, poultry), scores
-each import corridor for concentration and volatility risk, and produces
-baseline 6-month price forecasts with honestly backtested error rates.
+Tracks nine commodities (wheat, rice, sugar, palm oil, sunflower oil, poultry,
+beef, maize, soybean meal) spanning the essential categories — cereals, oils,
+sugar, protein, and animal feed — scores each import corridor for concentration
+and volatility risk, and produces baseline 6-month price forecasts with honestly
+backtested error rates.
 
 **Stack:** Python 3.11 · SQLite (star schema) · pandas · statsmodels (SARIMAX) · Streamlit + Plotly
 
