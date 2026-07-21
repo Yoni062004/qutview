@@ -22,6 +22,8 @@ Each entry is one or two sentences, tied back to the project where it helps.
 - **Price-taker / price-maker** — a price-taker must accept the world price (Ethiopia can't set the coffee price); a price-maker is big enough to move it. Almost everyone is a taker.
 - **Volatility** — how much a price jumps around. High volatility = unpredictable = risky. One of the three risk ingredients.
 - **Staple** — a basic dietary essential (wheat, rice). "Strategic staples" are the ones a government stockpiles for security.
+- **Feed dependency** — the hidden import exposure behind "local" food: UAE poultry, dairy, and meat are produced domestically but run on imported animal feed (the UAE banned fodder cultivation in 2006, imports 90%+ of feed). QUTVIEW tracks the two core feed inputs — maize (energy) and soybean meal (protein) — because a feed-corridor shock hits domestic production too.
+- **Soybean meal / oil-cake** — the high-protein solid left after soybean oil is pressed out; the main protein ingredient in animal feed. A *different product* from soybean oil (HS 2304 meal vs the oil) — QUTVIEW keeps them separate, and never maps meal to oil production data.
 - **Tariff** — a tax a government puts on imports. Raises costs and can disrupt trade routes.
 - **Hedging** — buying financial protection against a price swing (like insurance for commodity prices).
 
