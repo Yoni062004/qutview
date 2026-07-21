@@ -41,6 +41,11 @@ FAO_ITEMS = {
     "maize": 56,            # maize (corn)
     "sunflower_oil": 267,   # sunflower seed
     "beef": 867,            # meat of cattle with the bone, fresh or chilled
+    # No FAOSTAT crops/livestock production item for soybean MEAL (a processed
+    # feed, not a crop) -> None -> stored as zero, ~100% import-dependent. Do
+    # NOT map to "Soya bean oil" (item 237, which the UAE does produce): meal
+    # and oil are different products of the same bean.
+    "soybean_meal": None,
 }
 
 

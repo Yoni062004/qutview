@@ -26,6 +26,13 @@ COMMODITIES = {
     "maize": {"hs": "1005", "name": "Maize (feed)", "wb_series": "Maize", "unit": "USD/mt"},
     "sunflower_oil": {"hs": "1512", "name": "Sunflower oil", "wb_series": "Sunflower oil", "unit": "USD/mt"},
     "beef": {"hs": "0202", "name": "Beef (frozen)", "wb_series": "Beef", "unit": "USD/kg"},
+    # Animal-feed tranche 1: the UAE banned domestic fodder cultivation in 2006
+    # and imports 90%+ of feed. Soybean meal (HS 2304, oil-cake) is the protein
+    # half of the feed story; maize above is the energy half. wb_series must be
+    # "Soybean meal" exactly — the Pink Sheet also has separate "Soybeans" and
+    # "Soybean oil" columns. (Barley, HS 1003, is held: the World Bank
+    # discontinued its Pink Sheet price series in Aug 2020 — no current price.)
+    "soybean_meal": {"hs": "2304", "name": "Soybean meal", "wb_series": "Soybean meal", "unit": "USD/mt"},
 }
 
 

@@ -136,4 +136,12 @@ spike), 6-month SARIMAX forecast with 90% interval and the backtested MAPE:
 - [x] Monthly granularity via mirror statistics + rolling 12-month risk series
 - [x] Import-dependency ratios (FAOSTAT production data) + exposure-adjusted risk
 - [x] Phase 4b: Power BI report over the same SQLite database
+- [x] Animal-feed tranche 1: soybean meal (HS 2304) added — with maize, the
+      protein+energy feed-dependency pair (UAE imports 90%+ of feed)
+- [ ] Barley (HS 1003): **blocked on price source** — the World Bank
+      discontinued its Pink Sheet barley series in Aug 2020, so there is no
+      current monthly price. Trade + production data are clean; barley returns
+      once a live monthly price feed is wired in (candidates: IGC, Euronext
+      feed-barley futures, AHDB). Not added until then — no stale-price or
+      proxy-price shortcut.
 - [ ] AIS shipping-lane signals, satellite crop indices
