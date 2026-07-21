@@ -112,6 +112,14 @@ MOM_FALL = -0.05        # <= -5%
 MOM_SHARP_FALL = -0.15  # <= -15%
 MOM_12MO_MATERIAL = 0.10  # a 12-month move worth flagging as context when 6mo is flat
 FLAT_INCUMBENT_PCT = 5    # |incumbent value change| under this = "roughly flat"
+# A riser is only named as a "driver" if it is BOTH big in absolute terms and a
+# non-trivial share of the year's market — otherwise a rounding-error gain in a
+# collapsed market gets false top billing (soybean meal 2025: Türkiye +$0.25M).
+MATERIAL_RISER_USD = 1_000_000     # >= $1M absolute
+MATERIAL_RISER_SHARE = 0.02        # AND >= 2% of the latest-year market
+MARKET_CONTRACTION_PCT = 0.10      # when no origin grew materially and the market
+                                   # shrank at least this much, the contraction
+                                   # is the story (likely reporting lag)
 
 # ---------------------------------------------------------------- layer 1
 
@@ -312,11 +320,16 @@ def _flow_decomposition(conn, cid, flows_table, latest_year, provisional, top_or
                       if m["change_usd"] < 0 and m["origin"] not in zero_drop),
                      key=lambda m: m["change_usd"])[:3]
     incumbent = next((m for m in movers if m["origin"] == top_origin), None)
+    total_prev = sum(m["prev_value"] for m in movers)
+    total_latest = sum(m["latest_value"] for m in movers)
     return {
         "latest_year": latest_year, "prev_year": prev_year,
         "provisional": provisional,
         "incumbent": incumbent, "risers": risers, "fallers": fallers,
         "unreported": unreported,
+        "total_prev": total_prev, "total_latest": total_latest,
+        "market_change_pct": (100 * (total_latest - total_prev) / total_prev
+                              if total_prev else None),
     }
 
 
@@ -506,21 +519,41 @@ def concentration_driver_note(f: dict):
                 f"reflects {unrep['count']} origins (${_m(unrep['prev_value_usd'])} in "
                 f"{fd['prev_year']}) with no {fd['latest_year']} data yet — likely "
                 f"reporting lag, not real movement")
-    bits = []
-    if fd["risers"]:
-        r0 = fd["risers"][0]
+    # Case 3 — a named "driver" must clear the materiality floor (big in $ AND a
+    # non-trivial share of the year's market). A rounding-error gain in a
+    # collapsed market must NOT get top billing.
+    r0 = fd["risers"][0] if fd["risers"] else None
+    tp, tl = fd.get("total_prev"), fd.get("total_latest")
+    r0_material = (r0 is not None and r0["change_usd"] >= MATERIAL_RISER_USD
+                   and tl and r0["change_usd"] >= MATERIAL_RISER_SHARE * tl)
+    if r0_material:
         rp = f"+{r0['change_pct']:.0f}%" if r0["change_pct"] is not None else "new supplier"
-        bits.append(f"{r0['origin']} {rp} (+${_m(r0['change_usd'])})")
-    if inc and inc["change_pct"] is not None and inc["change_pct"] <= -FLAT_INCUMBENT_PCT:
-        bits.append(f"{inc['origin']} {inc['change_pct']:+.0f}%")
-    # Anchor the flow window explicitly so the (possibly older) data-year change
-    # is never conflated with the current-month price momentum beside it.
-    note = ("driven by " + ", ".join(bits)
-            + f" in the {fd['prev_year']}->{fd['latest_year']} supply mix") if bits else None
+        bits = [f"{r0['origin']} {rp} (+${_m(r0['change_usd'])})"]
+        if inc and inc["change_pct"] is not None and inc["change_pct"] <= -FLAT_INCUMBENT_PCT:
+            bits.append(f"{inc['origin']} {inc['change_pct']:+.0f}%")
+        # Anchor the flow window so the (possibly older) data-year change is never
+        # conflated with the current-month price momentum beside it.
+        note = ("driven by " + ", ".join(bits)
+                + f" in the {fd['prev_year']}->{fd['latest_year']} supply mix")
+    elif tp and tl and tl <= tp * (1 - MARKET_CONTRACTION_PCT):
+        # No origin grew materially and the reported market shrank — the
+        # contraction is the story, not the noise.
+        note = (f"the {fd['latest_year']} reported market contracted "
+                f"{(tp - tl) / tp * 100:.0f}% (${_m(tp)}->${_m(tl)}), likely reporting "
+                f"lag; no origin grew materially")
+    elif inc and inc["change_pct"] is not None and abs(inc["change_pct"]) >= FLAT_INCUMBENT_PCT:
+        # No material riser, market not contracted: describe the incumbent move.
+        note = (f"{inc['origin']} {inc['change_pct']:+.0f}% in the "
+                f"{fd['prev_year']}->{fd['latest_year']} supply mix; no origin grew "
+                f"materially")
+    else:
+        note = None
     if unrep:
+        # Don't repeat "likely reporting lag" if the note already said it
+        # (the contraction case does); keep it otherwise (e.g. "driven by ...").
+        tail = "" if (note and "reporting lag" in note) else " (likely reporting lag)"
         lag = (f"{unrep['count']} origins (${_m(unrep['prev_value_usd'])} in "
-               f"{fd['prev_year']}) report no {fd['latest_year']} data yet (likely "
-               f"reporting lag)")
+               f"{fd['prev_year']}) report no {fd['latest_year']} data yet{tail}")
         note = f"{note}; {lag}" if note else lag
     return note
 
