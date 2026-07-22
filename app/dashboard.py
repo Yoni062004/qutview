@@ -187,6 +187,7 @@ CATEGORIES = {
     "Sugar": ["sugar"],
     "Protein / meat": ["poultry", "beef"],
     "Animal feed": ["maize", "soybean_meal"],
+    "Dairy": ["dairy"],
 }
 
 
@@ -295,6 +296,17 @@ with left:
         f"### {COMMODITIES[cid]['name']} — {detail_year}"
         + (" *(provisional, mirror-derived)*" if detail_mirror else "")
     )
+    if cid == "dairy":
+        st.caption(
+            "**Scope & price basis (dairy):** the corridor is milk powder (HS 0402), "
+            "the storable, tradeable form the UAE imports. The UAE produces fresh "
+            "milk domestically (~266 kt/yr raw milk, FAOSTAT) but essentially no milk "
+            "powder — so the 100% dependency is for **powder specifically**, not all "
+            "dairy. The price is the **FAO Dairy Price Index (2014–16 = 100)** — an "
+            "index of broad dairy (skim/whole milk powder are major components, a "
+            "reasonable price proxy for HS 0402), not a $/kg price; volatility, "
+            "forecast, and momentum are returns-based so the index works unchanged."
+        )
     st.metric("Composite risk", f"{detail.composite_risk:.1f} / 100")
     dep = load(
         """SELECT dependency_pct, import_kt, production_kt FROM dependency_ratios

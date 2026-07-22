@@ -140,10 +140,19 @@ spike), 6-month SARIMAX forecast with 90% interval and the backtested MAPE:
 - [x] Phase 4b: Power BI report over the same SQLite database
 - [x] Animal-feed tranche 1: soybean meal (HS 2304) added — with maize, the
       protein+energy feed-dependency pair (UAE imports 90%+ of feed)
-- [ ] Barley (HS 1003): **blocked on price source** — the World Bank
-      discontinued its Pink Sheet barley series in Aug 2020, so there is no
-      current monthly price. Trade + production data are clean; barley returns
-      once a live monthly price feed is wired in (candidates: IGC, Euronext
-      feed-barley futures, AHDB). Not added until then — no stale-price or
+- [x] Dairy (milk powder, HS 0402) added — the UAE's #1 food import (~$1B/yr).
+      Priced from the FAO Dairy Price Index (an index, 2014-16=100, labelled as
+      such — not $/kg); ~100% import-dependent on powder (UAE produces fresh
+      milk but essentially no powder)
+- [ ] Barley (HS 1003): held pending a confirmed-current monthly price. The
+      World Bank discontinued its Pink Sheet barley series in Aug 2020; the IMF
+      PCPS barley series (USD/mt, FRED `PBARLUSDM`) is the candidate if it is
+      still updating. Trade + production data are clean. No stale-price or
       proxy-price shortcut.
+- [ ] Pulses (lentils/chickpeas): **parked** — no free monthly $/unit price
+      series with history back to ~2018 exists (only weekly/spot commercial
+      feeds; FAO producer prices are annual). No proxy.
+- [ ] Harden `comtrade_imports.py` retry to cover DNS/connection errors, not
+      only HTTP 429/5xx (self-recovers on retry today, but a transient DNS
+      blip aborts the whole run)
 - [ ] AIS shipping-lane signals, satellite crop indices

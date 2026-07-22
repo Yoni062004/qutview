@@ -33,6 +33,13 @@ COMMODITIES = {
     # "Soybean oil" columns. (Barley, HS 1003, is held: the World Bank
     # discontinued its Pink Sheet price series in Aug 2020 — no current price.)
     "soybean_meal": {"hs": "2304", "name": "Soybean meal", "wb_series": "Soybean meal", "unit": "USD/mt"},
+    # Dairy = milk powder (HS 0402), the storable strategic-reserve dairy form.
+    # Priced from the FAO Dairy Price Index (an INDEX, 2014-16=100 — not $/mt),
+    # so wb_series is None (not in the World Bank Pink Sheet) and it is ingested
+    # by fao_dairy_price.py. The UAE produces fresh milk but essentially no milk
+    # powder, so HS 0402 is ~100% import-dependent (disclosed in the UI).
+    "dairy": {"hs": "0402", "name": "Dairy (milk powder)", "wb_series": None,
+              "unit": "index (2014-16=100)"},
 }
 
 

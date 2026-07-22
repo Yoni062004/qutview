@@ -75,7 +75,10 @@ def parse_pink_sheet(content: bytes) -> list[tuple]:
     tuples — no database writes here, so a bad file can't corrupt anything."""
     raw = pd.read_excel(io.BytesIO(content), sheet_name="Monthly Prices", header=None)
 
-    targets = {_norm(meta["wb_series"]): cid for cid, meta in COMMODITIES.items()}
+    # Only commodities with a wb_series live in the Pink Sheet; others (e.g.
+    # dairy, priced from the FAO Dairy Price Index) are ingested separately.
+    targets = {_norm(meta["wb_series"]): cid for cid, meta in COMMODITIES.items()
+               if meta.get("wb_series")}
     header_row, col_for = None, {}
     for i in range(min(12, len(raw))):
         labels = {j: _norm(v) for j, v in raw.iloc[i].items()}
@@ -85,7 +88,7 @@ def parse_pink_sheet(content: bytes) -> list[tuple]:
             break
     if header_row is None:
         raise ValueError("Could not locate the commodity-name header row in Pink Sheet")
-    missing = set(COMMODITIES) - set(col_for.values())
+    missing = set(targets.values()) - set(col_for.values())
     if missing:
         raise ValueError(f"Pink Sheet columns not found for: {sorted(missing)}")
 
@@ -124,7 +127,13 @@ def fetch_live() -> list[tuple]:
 
 
 def store_rows(conn, rows) -> int:
-    conn.execute("DELETE FROM fact_prices")
+    # Replace only the Pink Sheet commodities' rows, so separately-ingested
+    # prices (e.g. the FAO dairy index) are never wiped by this run.
+    pink = [cid for cid, m in COMMODITIES.items() if m.get("wb_series")]
+    conn.execute(
+        f"DELETE FROM fact_prices WHERE commodity_id IN ({','.join('?' * len(pink))})",
+        pink,
+    )
     conn.executemany(
         "INSERT OR REPLACE INTO fact_prices (period, commodity_id, price) VALUES (?,?,?)",
         rows,

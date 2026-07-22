@@ -46,6 +46,11 @@ FAO_ITEMS = {
     # NOT map to "Soya bean oil" (item 237, which the UAE does produce): meal
     # and oil are different products of the same bean.
     "soybean_meal": None,
+    # Milk POWDER (HS 0402): no UAE production (the UAE produces fresh milk —
+    # ~266 kt/yr raw milk, FAOSTAT item 1780 — but essentially no milk powder).
+    # None -> zero -> ~100% import-dependent on powder specifically. Do NOT map
+    # to fresh-milk production: powder is the storable, tradeable form imported.
+    "dairy": None,
 }
 
 
