@@ -177,6 +177,51 @@ if (risks["source"] == "mirror_derived").any():
 
 st.divider()
 
+# ---------------- feed-dependency lens ----------------
+# The two animal-feed corridors. This is a curated grouping + honest framing,
+# NOT a computed feed->output link (we have no data mapping feed tonnage to
+# local production). Corridor figures below are QUTVIEW's own computed numbers;
+# the 2006-ban / 90%-imported facts are sourced context, labelled as such.
+FEED_COMMODITIES = ["maize", "soybean_meal"]
+
+st.subheader("Feed-dependency lens — the hidden exposure behind “local” food")
+feed_rows = []
+for fcid in FEED_COMMODITIES:
+    rr = load("SELECT c.name, r.year, r.source, r.composite_risk, r.top_origin, "
+              "r.top_origin_share FROM risk_scores r JOIN dim_commodity c "
+              "ON c.commodity_id = r.commodity_id WHERE r.commodity_id = ? "
+              "ORDER BY r.year DESC LIMIT 1", (fcid,))
+    dd = load("SELECT dependency_pct, import_kt, production_kt, year FROM dependency_ratios "
+              "WHERE commodity_id = ? AND dependency_pct IS NOT NULL "
+              "ORDER BY year DESC LIMIT 1", (fcid,))
+    if rr.empty:
+        continue
+    r0 = rr.iloc[0]
+    dep = None if dd.empty else dd.iloc[0]
+    feed_rows.append({
+        "Feed corridor": r0["name"],
+        "Import dependency": f"{dep.dependency_pct:.0f}%" if dep is not None else "n/a",
+        "Corridor risk": f"{r0.composite_risk:.0f} / 100",
+        "Top origin (concentration)": f"{r0.top_origin} {r0.top_origin_share*100:.0f}%",
+        "Data year": f"{int(r0.year)}"
+                     + (" (provisional)" if r0.source == "mirror_derived" else " (UAE-reported)"),
+    })
+st.caption("QUTVIEW-computed corridor figures for the UAE's two animal-feed imports:")
+st.dataframe(pd.DataFrame(feed_rows), width="stretch", hide_index=True)
+st.info(
+    "**Why this matters — sourced context, not a QUTVIEW-computed figure:** "
+    "the UAE banned domestic fodder cultivation in 2006 to preserve groundwater "
+    "and imports **90%+ of animal feed** (USDA Grain & Feed Annual). So the "
+    "country's *domestically-produced* poultry, dairy, and meat run on these "
+    "imported feed corridors — meaning even the “local” share of those "
+    "foods is not truly self-sufficient. The dependency and risk numbers above "
+    "are QUTVIEW's own grounded output; the 2006 ban and the 90% figure are "
+    "cited context. We do **not** compute a feed-tonnage → local-output link "
+    "— no such data exists in the system, so none is claimed."
+)
+
+st.divider()
+
 # ---------------- commodity detail ----------------
 cid = st.selectbox(
     "Commodity detail",
