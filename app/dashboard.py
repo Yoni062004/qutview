@@ -177,6 +177,61 @@ if (risks["source"] == "mirror_derived").any():
 
 st.divider()
 
+# ---------------- category risk rollup ----------------
+# Curated grouping of the 9 commodities into Silal's essential categories, so
+# risk reads in the language a food-security buyer manages. A rollup is a
+# SUMMARY of its members — never an independent measurement.
+CATEGORIES = {
+    "Cereals": ["wheat", "rice"],
+    "Edible oils": ["palm_oil", "sunflower_oil"],
+    "Sugar": ["sugar"],
+    "Protein / meat": ["poultry", "beef"],
+    "Animal feed": ["maize", "soybean_meal"],
+}
+
+
+def _latest_value(cid: str, source: str, year: int) -> float:
+    table = "fact_imports_mirror_annual" if source == "mirror_derived" else "fact_imports"
+    v = load(f"SELECT coalesce(sum(trade_value_usd), 0) AS v FROM {table} "
+             f"WHERE commodity_id = ? AND year = ?", (cid, int(year)))
+    return float(v["v"].iloc[0])
+
+
+st.subheader("Category risk overview")
+cat_rows = []
+for cat, members in CATEGORIES.items():
+    sub = risks[risks["commodity_id"].isin(members)]
+    wsum = risksum = 0.0
+    worst = None
+    provisional = False
+    for _, m in sub.iterrows():
+        val = _latest_value(m.commodity_id, m.source, m.year)
+        wsum += val
+        risksum += m.composite_risk * val
+        provisional = provisional or (m.source == "mirror_derived")
+        if worst is None or m.composite_risk > worst[1]:
+            worst = (m["name"], m.composite_risk)
+    rolled = risksum / wsum if wsum else sub["composite_risk"].mean()
+    cat_rows.append({
+        "Category": cat,
+        "Rolled-up risk": f"{rolled:.0f} / 100",
+        "Headline driver (worst member)": f"{worst[0]} ({worst[1]:.0f})",
+        "Members": ", ".join(sub["name"]),
+        "Basis": "incl. provisional" if provisional else "UAE-reported",
+    })
+st.dataframe(pd.DataFrame(cat_rows), width="stretch", hide_index=True)
+st.caption(
+    "Derived summary — each category's rolled-up risk is the **import-value-"
+    "weighted average** of its member commodities' composite risk (a larger "
+    "corridor weighs more), using each member's latest-year import value. It is "
+    "an aggregation of the per-commodity scores above, not a separate "
+    "measurement. **incl. provisional** means at least one member's latest year "
+    "is mirror-derived (see the corridor cards); such rollups mix a UAE-reported "
+    "anchor with provisional data."
+)
+
+st.divider()
+
 # ---------------- feed-dependency lens ----------------
 # The two animal-feed corridors. This is a curated grouping + honest framing,
 # NOT a computed feed->output link (we have no data mapping feed tonnage to
