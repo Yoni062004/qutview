@@ -188,6 +188,7 @@ CATEGORIES = {
     "Protein / meat": ["poultry", "beef"],
     "Animal feed": ["maize", "soybean_meal", "barley"],
     "Dairy": ["dairy"],
+    "Pulses": ["lentils"],
 }
 
 
@@ -307,6 +308,16 @@ with left:
             "index of broad dairy (skim/whole milk powder are major components, a "
             "reasonable price proxy for HS 0402), not a $/kg price; volatility, "
             "forecast, and momentum are returns-based so the index works unchanged."
+        )
+    if cid == "lentils":
+        st.caption(
+            "**Scope & price basis (lentils):** the corridor is lentils (HS 0713.40). "
+            "The price is the **US PPI for Dry Peas & Lentils (index, 2015 = 100)** — "
+            "an index (lentils are a core component; peas are a related pulse, a "
+            "reasonable proxy), not a $/kg price; volatility, forecast, and momentum "
+            "are returns-based so the index works unchanged. Chickpeas (HS 0713.20) "
+            "are a separate corridor this index does not cover — not blended in here, "
+            "and not yet tracked (no clean chickpea price source)."
         )
     st.metric("Composite risk", f"{detail.composite_risk:.1f} / 100")
     dep = load(

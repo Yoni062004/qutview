@@ -1,12 +1,12 @@
 # QUTVIEW — Sovereign Food-Corridor Risk Intelligence (Prototype)
 
 Early-warning risk intelligence for the UAE's strategic food import corridors.
-Tracks eleven commodities (wheat, rice, sugar, palm oil, sunflower oil, poultry,
-beef, dairy, maize, soybean meal, barley) spanning every essential category —
-cereals, oils, sugar, protein, dairy, and the complete animal-feed complex
-(energy grain, protein meal, and barley) — scores each import corridor for
-concentration and volatility risk, and produces baseline 6-month price forecasts
-with honestly backtested error rates.
+Tracks twelve commodities (wheat, rice, sugar, palm oil, sunflower oil, poultry,
+beef, dairy, maize, soybean meal, barley, lentils) spanning every essential
+category — cereals, oils, sugar, protein, dairy, pulses, and the complete
+animal-feed complex (energy grain, protein meal, and barley) — scores each
+import corridor for concentration and volatility risk, and produces baseline
+6-month price forecasts with honestly backtested error rates.
 
 **Stack:** Python 3.11 · SQLite (star schema) · pandas · statsmodels (SARIMAX) · Streamlit + Plotly
 
@@ -152,9 +152,15 @@ spike), 6-month SARIMAX forecast with 90% interval and the backtested MAPE:
       Gated to 2023 (~42% mirror coverage, like wheat); ~100% import-dependent.
       No monthly mirror monitor (those origins report HS 1003 to the UAE
       annually, not monthly) — disclosed as a data gap.
-- [ ] Pulses (lentils/chickpeas): **parked** — no free monthly $/unit price
-      series with history back to ~2018 exists (only weekly/spot commercial
-      feeds; FAO producer prices are annual). No proxy.
+- [x] Lentils (HS 0713.40) added — the pulses corridor ($324M in 2023,
+      Canada-dominant, ~100% import-dependent). Priced from the US PPI for Dry
+      Peas & Lentils (FRED `WPU0113012`, an index 2015=100, labelled as such —
+      lentils are a core component; peas a reasonable proxy). Extends to
+      mirror-derived 2025 (86% coverage).
+- [ ] Chickpeas (HS 0713.20): **parked on price** — a material corridor
+      (~$116M) but the Dry Peas & Lentils index does not cover chickpeas, and
+      the only chickpea-specific monthly source is StatCan in CAD (FX). Buildable
+      if a clean chickpea price series appears — no proxy until then.
 - [ ] Harden `comtrade_imports.py` retry to cover DNS/connection errors, not
       only HTTP 429/5xx (self-recovers on retry today, but a transient DNS
       blip aborts the whole run)

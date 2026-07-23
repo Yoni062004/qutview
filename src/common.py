@@ -46,6 +46,14 @@ COMMODITIES = {
     # ingested by fred_barley_price.py. ~100% import-dependent (UAE grows no
     # barley at scale — fodder-cultivation ban).
     "barley": {"hs": "1003", "name": "Barley", "wb_series": None, "unit": "USD/mt"},
+    # Lentils (HS 0713.40) — the pulses corridor. No clean $/mt lentil price
+    # exists; priced from the US PPI for Dry Peas & Lentils (FRED WPU0113012),
+    # an INDEX (2015=100) like the dairy index, ingested by fred_lentils_price.py.
+    # The index covers peas+lentils (the corridor is lentils only — a reasonable
+    # proxy, disclosed). Chickpeas are a separate corridor with no clean price,
+    # parked. ~100% import-dependent (no UAE lentil production).
+    "lentils": {"hs": "071340", "name": "Lentils", "wb_series": None,
+                "unit": "index (US PPI, 2015=100)"},
 }
 
 

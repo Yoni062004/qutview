@@ -52,6 +52,7 @@ FAO_ITEMS = {
     # to fresh-milk production: powder is the storable, tradeable form imported.
     "dairy": None,
     "barley": 44,          # rows exist but values are missing/zero -> 0 (like wheat)
+    "lentils": 201,        # 'Lentils, dry' — no UAE rows -> 0 -> ~100% dependent
 }
 
 
