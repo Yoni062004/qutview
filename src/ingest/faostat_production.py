@@ -51,6 +51,7 @@ FAO_ITEMS = {
     # None -> zero -> ~100% import-dependent on powder specifically. Do NOT map
     # to fresh-milk production: powder is the storable, tradeable form imported.
     "dairy": None,
+    "barley": 44,          # rows exist but values are missing/zero -> 0 (like wheat)
 }
 
 

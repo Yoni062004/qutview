@@ -40,6 +40,12 @@ COMMODITIES = {
     # powder, so HS 0402 is ~100% import-dependent (disclosed in the UI).
     "dairy": {"hs": "0402", "name": "Dairy (milk powder)", "wb_series": None,
               "unit": "index (2014-16=100)"},
+    # Barley (HS 1003) — the third feed grain. Priced from FRED PBARLUSDM (IMF
+    # PCPS: US No. 2 feed barley, USDA), a real USD/mt price, so wb_series is
+    # None (not in the Pink Sheet, which dropped barley in 2020) and it is
+    # ingested by fred_barley_price.py. ~100% import-dependent (UAE grows no
+    # barley at scale — fodder-cultivation ban).
+    "barley": {"hs": "1003", "name": "Barley", "wb_series": None, "unit": "USD/mt"},
 }
 
 

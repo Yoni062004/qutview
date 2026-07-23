@@ -1,11 +1,12 @@
 # QUTVIEW — Sovereign Food-Corridor Risk Intelligence (Prototype)
 
 Early-warning risk intelligence for the UAE's strategic food import corridors.
-Tracks nine commodities (wheat, rice, sugar, palm oil, sunflower oil, poultry,
-beef, maize, soybean meal) spanning the essential categories — cereals, oils,
-sugar, protein, and animal feed — scores each import corridor for concentration
-and volatility risk, and produces baseline 6-month price forecasts with honestly
-backtested error rates.
+Tracks eleven commodities (wheat, rice, sugar, palm oil, sunflower oil, poultry,
+beef, dairy, maize, soybean meal, barley) spanning every essential category —
+cereals, oils, sugar, protein, dairy, and the complete animal-feed complex
+(energy grain, protein meal, and barley) — scores each import corridor for
+concentration and volatility risk, and produces baseline 6-month price forecasts
+with honestly backtested error rates.
 
 **Stack:** Python 3.11 · SQLite (star schema) · pandas · statsmodels (SARIMAX) · Streamlit + Plotly
 
@@ -144,11 +145,13 @@ spike), 6-month SARIMAX forecast with 90% interval and the backtested MAPE:
       Priced from the FAO Dairy Price Index (an index, 2014-16=100, labelled as
       such — not $/kg); ~100% import-dependent on powder (UAE produces fresh
       milk but essentially no powder)
-- [ ] Barley (HS 1003): held pending a confirmed-current monthly price. The
-      World Bank discontinued its Pink Sheet barley series in Aug 2020; the IMF
-      PCPS barley series (USD/mt, FRED `PBARLUSDM`) is the candidate if it is
-      still updating. Trade + production data are clean. No stale-price or
-      proxy-price shortcut.
+- [x] Barley (HS 1003) added — completes the animal-feed complex (maize +
+      soybean meal + barley). The World Bank dropped its Pink Sheet barley
+      series in Aug 2020, but the IMF PCPS series (USD/mt, FRED `PBARLUSDM`,
+      confirmed current) replaces it — a real price, no FX or index needed.
+      Gated to 2023 (~42% mirror coverage, like wheat); ~100% import-dependent.
+      No monthly mirror monitor (those origins report HS 1003 to the UAE
+      annually, not monthly) — disclosed as a data gap.
 - [ ] Pulses (lentils/chickpeas): **parked** — no free monthly $/unit price
       series with history back to ~2018 exists (only weekly/spot commercial
       feeds; FAO producer prices are annual). No proxy.

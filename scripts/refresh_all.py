@@ -31,6 +31,7 @@ STEPS = [
     ("src/ingest/comtrade_imports.py", True),
     ("src/ingest/worldbank_prices.py", True),
     ("src/ingest/fao_dairy_price.py", True),
+    ("src/ingest/fred_barley_price.py", True),
     ("src/ingest/comtrade_mirror_monthly.py", True),
     ("src/ingest/comtrade_mirror_annual.py", True),
     ("src/ingest/faostat_production.py", True),

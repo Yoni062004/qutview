@@ -186,7 +186,7 @@ CATEGORIES = {
     "Edible oils": ["palm_oil", "sunflower_oil"],
     "Sugar": ["sugar"],
     "Protein / meat": ["poultry", "beef"],
-    "Animal feed": ["maize", "soybean_meal"],
+    "Animal feed": ["maize", "soybean_meal", "barley"],
     "Dairy": ["dairy"],
 }
 
@@ -234,11 +234,11 @@ st.caption(
 st.divider()
 
 # ---------------- feed-dependency lens ----------------
-# The two animal-feed corridors. This is a curated grouping + honest framing,
+# The animal-feed corridors. This is a curated grouping + honest framing,
 # NOT a computed feed->output link (we have no data mapping feed tonnage to
 # local production). Corridor figures below are QUTVIEW's own computed numbers;
 # the 2006-ban / 90%-imported facts are sourced context, labelled as such.
-FEED_COMMODITIES = ["maize", "soybean_meal"]
+FEED_COMMODITIES = ["maize", "soybean_meal", "barley"]
 
 st.subheader("Feed-dependency lens — the hidden exposure behind “local” food")
 feed_rows = []
@@ -262,7 +262,8 @@ for fcid in FEED_COMMODITIES:
         "Data year": f"{int(r0.year)}"
                      + (" (provisional)" if r0.source == "mirror_derived" else " (UAE-reported)"),
     })
-st.caption("QUTVIEW-computed corridor figures for the UAE's two animal-feed imports:")
+st.caption("QUTVIEW-computed corridor figures for the UAE's animal-feed imports "
+           "(the complete feed complex — energy grain, protein meal, and barley):")
 st.dataframe(pd.DataFrame(feed_rows), width="stretch", hide_index=True)
 st.info(
     "**Why this matters — sourced context, not a QUTVIEW-computed figure:** "
