@@ -185,7 +185,7 @@ CATEGORIES = {
     "Cereals": ["wheat", "rice"],
     "Edible oils": ["palm_oil", "sunflower_oil"],
     "Sugar": ["sugar"],
-    "Protein / meat": ["poultry", "beef"],
+    "Protein / meat": ["poultry", "beef", "mutton"],
     "Animal feed": ["maize", "soybean_meal", "barley"],
     "Dairy": ["dairy"],
     "Pulses": ["lentils"],
@@ -308,6 +308,24 @@ with left:
             "index of broad dairy (skim/whole milk powder are major components, a "
             "reasonable price proxy for HS 0402), not a $/kg price; volatility, "
             "forecast, and momentum are returns-based so the index works unchanged."
+        )
+    if cid == "mutton":
+        st.caption(
+            "**Scope & price basis (sheep & goat meat):** dependency (≈51%) is for "
+            "sheep + goat meat combined (HS 0204). Domestic production is ~93% goat; "
+            "imports are predominantly sheep/lamb (Australia-led) — so the aggregate "
+            "**understates** lamb-specific dependency (conservative, never overstated). "
+            "Price uses the World Bank **“Lamb” (sheep) series ($/kg)** as a "
+            "disclosed proxy for the combined corridor."
+        )
+    if cid == "mutton":
+        st.caption(
+            "**Scope & dependency basis (sheep & goat meat):** dependency (~51%) is for "
+            "sheep + goat meat combined (HS 0204). Domestic production is ~93% goat; "
+            "imports are predominantly sheep/lamb (Australia-led) — so the aggregate "
+            "**understates** lamb-specific dependency (the conservative direction). "
+            "Price uses the World Bank **\"Lamb\" (sheep) series ($/kg)** as a disclosed "
+            "proxy for the combined corridor."
         )
     if cid == "lentils":
         st.caption(

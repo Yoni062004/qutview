@@ -1,12 +1,12 @@
 # QUTVIEW — Sovereign Food-Corridor Risk Intelligence (Prototype)
 
 Early-warning risk intelligence for the UAE's strategic food import corridors.
-Tracks twelve commodities (wheat, rice, sugar, palm oil, sunflower oil, poultry,
-beef, dairy, maize, soybean meal, barley, lentils) spanning every essential
-category — cereals, oils, sugar, protein, dairy, pulses, and the complete
-animal-feed complex (energy grain, protein meal, and barley) — scores each
-import corridor for concentration and volatility risk, and produces baseline
-6-month price forecasts with honestly backtested error rates.
+Tracks thirteen commodities (wheat, rice, sugar, palm oil, sunflower oil,
+poultry, beef, sheep & goat meat, dairy, maize, soybean meal, barley, lentils)
+spanning every essential category — cereals, oils, sugar, protein, dairy,
+pulses, and the complete animal-feed complex (energy grain, protein meal, and
+barley) — scores each import corridor for concentration and volatility risk, and
+produces baseline 6-month price forecasts with honestly backtested error rates.
 
 **Stack:** Python 3.11 · SQLite (star schema) · pandas · statsmodels (SARIMAX) · Streamlit + Plotly
 
@@ -141,6 +141,13 @@ spike), 6-month SARIMAX forecast with 90% interval and the backtested MAPE:
 - [x] Phase 4b: Power BI report over the same SQLite database
 - [x] Animal-feed tranche 1: soybean meal (HS 2304) added — with maize, the
       protein+energy feed-dependency pair (UAE imports 90%+ of feed)
+- [x] Sheep & goat meat (mutton, HS 0204) added — a $435M red-meat corridor,
+      Australia-dominant with a Horn-of-Africa mix (Kenya, Ethiopia, India).
+      Pink-Sheet-native ("Lamb" series, $/kg — no new adapter). The one
+      **partial-dependency** commodity (~51%): the UAE produces ~63 kt/yr
+      (predominantly goat), so it isn't 100% import-dependent like the grains.
+      Live sheep (HS 0104) parked — no clean monthly price (only AUD regional
+      live-export series).
 - [x] Dairy (milk powder, HS 0402) added — the UAE's #1 food import (~$1B/yr).
       Priced from the FAO Dairy Price Index (an index, 2014-16=100, labelled as
       such — not $/kg); ~100% import-dependent on powder (UAE produces fresh

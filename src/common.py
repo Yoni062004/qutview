@@ -54,6 +54,14 @@ COMMODITIES = {
     # parked. ~100% import-dependent (no UAE lentil production).
     "lentils": {"hs": "071340", "name": "Lentils", "wb_series": None,
                 "unit": "index (US PPI, 2015=100)"},
+    # Sheep & goat meat (HS 0204) — the red-meat corridor, Australia-dominant
+    # with a Horn-of-Africa mix (Kenya, Ethiopia, India). Pink-Sheet-NATIVE:
+    # wb_series "Lamb" (sheep) is a disclosed proxy for the sheep+goat corridor
+    # (no new adapter — worldbank_prices.py picks it up like beef). FAOSTAT item
+    # 1807 = sheep meat + goat meat. ~51% import-dependent (PARTIAL — the UAE
+    # produces ~63 kt/yr, predominantly goat; imports are sheep/lamb-led).
+    "mutton": {"hs": "0204", "name": "Sheep & goat meat", "wb_series": "Lamb",
+               "unit": "USD/kg"},
 }
 
 

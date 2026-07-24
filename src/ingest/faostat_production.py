@@ -53,6 +53,9 @@ FAO_ITEMS = {
     "dairy": None,
     "barley": 44,          # rows exist but values are missing/zero -> 0 (like wheat)
     "lentils": 201,        # 'Lentils, dry' — no UAE rows -> 0 -> ~100% dependent
+    # 'Sheep and Goat Meat' aggregate = sheep meat (977) + goat meat (1017),
+    # exactly HS 0204's scope. UAE produces ~63 kt (2023) -> ~51% dependent.
+    "mutton": 1807,
 }
 
 
