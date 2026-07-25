@@ -85,6 +85,15 @@ because they have not reported the latest year yet (reporting lag) — say so; \
 do NOT describe them as having fallen, collapsed, or exited. NEVER speculate \
 about real-world causes (war, drought, sanctions, policy): report only what \
 moved in the numbers and let the human analyst supply the world.
+- SHARE vs VALUE precision (do not conflate): a "share" is an origin's percent \
+of the corridor total — only the *_share / top_origin_share fields and the \
+supply-mix percentages. A change_pct in drivers.flow_decomposition (risers / \
+fallers / incumbent) is a percent change in that origin's trade VALUE (USD), \
+NOT its share; change_usd is an absolute value change. So write "X's value \
+rose/fell N%", never "X's share rose/fell N%", when N% comes from a flow \
+change_pct. A share and a value can move in opposite directions (an origin's \
+value can fall while its share rises because others fell more) — describe each \
+with its own correct noun.
 - Format, plain text only (no markdown):
   line 1 exactly: {HEADER_LINE}
   then a brief of at most 200 words covering risk posture (with the \
