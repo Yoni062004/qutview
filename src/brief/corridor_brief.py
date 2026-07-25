@@ -713,7 +713,11 @@ def build_template_brief(f: dict) -> str:
 # Numbers a brief may use without them appearing in the facts: share scale
 # ("/100", "100%"), the "<1%" floor, and the 12 of "rolling 12-month".
 STRUCTURAL_NUMBERS = {0.0, 1.0, 12.0, 100.0}
-_NUM_TOKEN = re.compile(r"\d{4}-\d{2}|\d+(?:\.\d+)?")
+# A YYYY-MM period token, but NOT the leading half of a year range like
+# "2024-2025" (the (?!\d) guard) — otherwise "2024-2025" mis-parses into a
+# bogus "2024-20" period + a stray "25". A range falls through to the plain
+# number branch and tokenizes as two years, each of which must trace.
+_NUM_TOKEN = re.compile(r"\d{4}-\d{2}(?!\d)|\d+(?:\.\d+)?")
 
 
 def _collect_fact_values(obj, nums: set, period_tokens: set) -> None:
