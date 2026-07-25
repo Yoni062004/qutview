@@ -68,7 +68,12 @@ a UAE food-import risk monitor.
 Non-negotiable rules:
 - Use ONLY numbers present in the provided fact JSON. Never invent a figure, \
 a supplier, a freight rate, or a landed cost. Every quantitative claim must \
-trace to a provided field.
+trace to a provided field. Do NOT calculate new numbers yourself (no \
+differences, sums, ratios, or absolute changes you compute) — a number you \
+write must appear in the facts as given. Express a change using the form the \
+facts already give it ("A -> B", or "N%"); never also state the subtracted \
+absolute difference (e.g. if the note says "160M -> 55M", do not write "a \
+$105M contraction" — 105 is not in the facts).
 - If something is missing (see "gaps"), say so plainly instead of guessing.
 - State provenance plainly: if provenance.provisional is true, the data year \
 is reconstructed from mirror statistics and the brief must say so; if the \
@@ -98,8 +103,15 @@ with its own correct noun.
   line 1 exactly: {HEADER_LINE}
   then a brief of at most 200 words covering risk posture (with the \
 previous-year comparison), origin concentration and supply mix, import \
-dependency, price/forecast, and one "What moved" observation from the \
-drivers section under the framing rules above.
+dependency, price/forecast, and the "What moved" observation. For "What \
+moved" use drivers.what_moved_note as the AUTHORITATIVE framing — rephrase it \
+for fluency but PRESERVE its meaning exactly. In particular: if it says the \
+incumbent's value was flat/roughly flat and the top-origin SHARE rise \
+reflects reporting lag, say that explicitly and do NOT present the share rise \
+as real concentration growth or a surge; do NOT name as "drivers" any origins \
+the note omits (they are below the materiality floor — mentioning them as \
+drivers is wrong even though their numbers appear elsewhere in the facts); if \
+the note leads with a market contraction, lead with the contraction too.
   then one line starting "Recommended for review:" with ONE concrete action \
 grounded in the data — name the numbers that justify it, no vague advice.
   then one line starting "Confidence & caveats:" including the forecast \
@@ -448,7 +460,7 @@ def assemble_facts(conn, cid: str) -> dict:
            WHERE commodity_id = ? AND year > ? ORDER BY year""",
         (cid, latest["year"]))]
 
-    return {
+    facts = {
         "commodity": {"id": cid, "name": COMMODITIES[cid]["name"],
                       "hs_code": COMMODITIES[cid]["hs"], "price_unit": COMMODITIES[cid]["unit"]},
         "risk_latest": latest,
@@ -477,6 +489,13 @@ def assemble_facts(conn, cid: str) -> dict:
         },
         "gaps": gaps,
     }
+    # The deterministic "what moved" narrative — applies the materiality floor,
+    # the $0-drop reporting-lag guard, and the flat-incumbent framing. It is the
+    # single source of truth for the driver story: the template uses it verbatim
+    # and the LLM must preserve its meaning (rephrase, never re-derive), so the
+    # honesty rules that live in Python can't be bypassed by the model.
+    facts["drivers"]["what_moved_note"] = _what_moved(facts)
+    return facts
 
 
 # ---------------------------------------------------------------- layer 2
@@ -685,7 +704,7 @@ def build_template_brief(f: dict) -> str:
                   f"({f['latest_price']['period']}); 6-month forecast {f['forecast']['direction']} "
                   f"({f['forecast']['pct_vs_latest_price']:+.1f}% by {f['forecast']['end_period']})."]
 
-    moved = _what_moved(f)
+    moved = f["drivers"].get("what_moved_note") or _what_moved(f)
     if moved:
         lines += [f"What moved: {moved}"]
 
