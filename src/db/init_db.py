@@ -154,6 +154,19 @@ CREATE TABLE IF NOT EXISTS mirror_coverage_annual (
     coverage_pct    REAL,
     PRIMARY KEY (commodity_id, year)
 );
+
+-- Analyst sign-off on each generated brief (human-in-the-loop audit trail).
+-- Keyed by the data version (data_stamp = the pipeline's last-loaded time) so a
+-- decision is tied to the exact data it reviewed: when the data refreshes, the
+-- corridor needs re-review rather than silently carrying a stale approval.
+CREATE TABLE IF NOT EXISTS brief_decisions (
+    commodity_id    TEXT NOT NULL REFERENCES dim_commodity(commodity_id),
+    data_stamp      TEXT NOT NULL,
+    decision        TEXT NOT NULL,   -- 'approved' | 'revision_requested'
+    note            TEXT,
+    decided_at      TEXT NOT NULL,
+    PRIMARY KEY (commodity_id, data_stamp)
+);
 """
 
 

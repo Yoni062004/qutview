@@ -586,7 +586,81 @@ brief_text, brief_mode, brief_detail = cached_brief(cid, data_stamp)
 badge = ("🤖 LLM-GENERATED · " + brief_detail if brief_mode == "llm"
          else "📋 TEMPLATE (deterministic, no AI) · " + brief_detail)
 st.caption(f"Brief source — {badge} · draft for human review, not a decision")
-st.text(brief_text)
+
+# The brief's last line is a static "Analyst decision: [ ] approve [ ] revise"
+# placeholder — drop it from the display and replace with a working control.
+brief_body = brief_text.split("Analyst decision:")[0].rstrip()
+st.text(brief_body)
+
+
+def load_decision(commodity_id, stamp):
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT decision, note, decided_at FROM brief_decisions "
+            "WHERE commodity_id = ? AND data_stamp = ?", (commodity_id, str(stamp))
+        ).fetchone()
+    return dict(zip(("decision", "note", "decided_at"), row)) if row else None
+
+
+def record_decision(commodity_id, stamp, decision, note):
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO brief_decisions "
+            "(commodity_id, data_stamp, decision, note, decided_at) "
+            "VALUES (?,?,?,?, datetime('now'))",
+            (commodity_id, str(stamp), decision, note or None))
+        conn.commit()
+
+
+# ---- working analyst decision: human signs off, logged with an audit trail ----
+st.markdown("**Analyst decision** — the AI drafts and recommends; a human approves.")
+dec = load_decision(cid, data_stamp)
+if dec:
+    if dec["decision"] == "approved":
+        st.success(f"✓ Approved by analyst · {dec['decided_at']} UTC")
+    else:
+        st.warning(f"✎ Revision requested · {dec['decided_at']} UTC"
+                   + (f" — “{dec['note']}”" if dec["note"] else ""))
+else:
+    st.caption("No decision recorded yet for this corridor on the current data.")
+
+d1, d2 = st.columns(2)
+if d1.button("✓ Approve", key=f"approve_{cid}", width="stretch"):
+    record_decision(cid, data_stamp, "approved", None)
+    st.rerun()
+rev_note = d2.text_input("Revision note (optional)", key=f"revnote_{cid}",
+                         placeholder="Reason for revision…", label_visibility="collapsed")
+if d2.button("✎ Request revision", key=f"revise_{cid}", width="stretch"):
+    record_decision(cid, data_stamp, "revision_requested", rev_note)
+    st.rerun()
+st.caption("The decision is tied to this data version — a pipeline refresh clears "
+           "it so the corridor is re-reviewed on the new numbers, never carrying a "
+           "stale approval.")
+
+# ---- download the corridor report (walk through / share offline) ----
+_dep_line = ""
+if not dep.empty and pd.notna(dep.dependency_pct[0]):
+    _dep_line = f"- Import dependency: {float(dep.dependency_pct[0]):.0f}%\n"
+report_md = (
+    f"# QUTVIEW corridor report — {COMMODITIES[cid]['name']}\n\n"
+    f"Data year {detail_year} "
+    f"({'provisional, mirror-derived' if detail_mirror else 'UAE-reported'}) · "
+    f"brief source: {brief_mode.upper()} ({brief_detail})\n\n"
+    f"## Headline\n"
+    f"- Composite risk: {detail.composite_risk:.1f} / 100 (HHI {detail.hhi:.2f})\n"
+    f"- Top origin: {detail.top_origin} ({detail.top_origin_share*100:.0f}%), "
+    f"{int(detail.n_origins)} origins\n"
+    f"{_dep_line}"
+    + (f"- Forecast backtest MAPE: {float(bt.mape_pct[0]):.1f}%\n" if not bt.empty else "")
+    + f"\n## Intelligence brief\n\n{brief_body}\n\n"
+    f"## Analyst decision\n\n"
+    + (f"{dec['decision']} · {dec['decided_at']} UTC"
+       + (f" — {dec['note']}" if dec.get('note') else "")
+       if dec else "not yet reviewed") + "\n"
+)
+st.download_button("⬇ Download corridor report (.md)", report_md,
+                   file_name=f"qutview_{cid}_report.md", mime="text/markdown",
+                   key=f"dl_{cid}")
 
 # ---------------- monthly corridor monitor (mirror data) ----------------
 st.divider()
