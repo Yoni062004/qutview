@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QUTVIEW — Sovereign Food-Import Corridor Risk Intelligence for the UAE</title>
+<meta name="description" content="QUTVIEW scores the structure of the UAE's food-import corridors — concentration, dependency, and price-volatility risk — and warns before a shock hits. The risk price monitors can't see.">
+<style>
+  :root{
+    --navy:#15324C; --navy2:#1E3A56; --amber:#D99B2B; --ink:#1B2733;
+    --mute:#5F7180; --light:#EEF2F6; --ice:#CFE0F0; --line:#E2E8EF; --white:#FFFFFF;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);line-height:1.6;background:var(--white);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  a{color:inherit}
+  .serif{font-family:Georgia,"Times New Roman",serif}
+
+  /* header */
+  header{position:sticky;top:0;z-index:10;background:rgba(21,50,76,.97);backdrop-filter:blur(6px)}
+  header .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+  .brand{font-family:Georgia,serif;font-weight:700;font-size:22px;color:#fff;letter-spacing:.5px}
+  .brand span{color:var(--amber)}
+  nav a{color:var(--ice);text-decoration:none;font-size:14px;margin-left:26px}
+  nav a:hover{color:#fff}
+  .nav-cta{background:var(--amber);color:#12212f !important;padding:8px 16px;border-radius:6px;font-weight:600}
+  @media(max-width:640px){nav a:not(.nav-cta){display:none}}
+
+  /* hero */
+  .hero{background:linear-gradient(160deg,#15324C 0%,#0F2537 100%);color:#fff;padding:96px 0 88px}
+  .kicker{color:var(--amber);font-weight:700;font-size:13px;letter-spacing:2px;text-transform:uppercase;margin-bottom:18px}
+  .hero h1{font-family:Georgia,serif;font-size:52px;line-height:1.1;margin-bottom:20px}
+  .hero p.lede{font-size:20px;color:var(--ice);max-width:760px;margin-bottom:14px}
+  .hero p.tag{font-style:italic;color:var(--amber);font-size:16px;margin-bottom:34px}
+  .btns a{display:inline-block;text-decoration:none;font-weight:600;font-size:15px;padding:13px 24px;border-radius:7px;margin-right:12px;margin-bottom:10px}
+  .btn-primary{background:var(--amber);color:#12212f}
+  .btn-ghost{border:1px solid #40607e;color:#fff}
+  @media(max-width:640px){.hero h1{font-size:36px}.hero{padding:64px 0 56px}}
+
+  /* sections */
+  section{padding:74px 0}
+  .sec-kicker{color:var(--amber);font-weight:700;font-size:12px;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px}
+  h2{font-family:Georgia,serif;font-size:32px;color:var(--navy);line-height:1.2;margin-bottom:14px}
+  .lead{font-size:17px;color:var(--mute);max-width:820px;margin-bottom:36px}
+  .alt{background:var(--light)}
+
+  /* problem line */
+  .problem{background:var(--navy2);color:#fff;padding:56px 0}
+  .problem h2{color:#fff}
+  .problem .lead{color:var(--ice)}
+  .problem strong{color:var(--amber)}
+
+  /* stack */
+  .stack{display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+  .step{text-align:center}
+  .step .num{width:52px;height:52px;border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;
+    justify-content:center;font-family:Georgia,serif;font-weight:700;font-size:20px;color:#fff}
+  .step h4{font-size:15px;color:var(--navy);margin-bottom:4px}
+  .step p{font-size:12.5px;color:var(--mute);line-height:1.4}
+  @media(max-width:760px){.stack{grid-template-columns:repeat(2,1fr);gap:22px}}
+
+  /* cards */
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:26px;box-shadow:0 2px 10px rgba(20,40,60,.05)}
+  .card .dot{width:34px;height:34px;border-radius:50%;margin-bottom:14px}
+  .card h3{font-family:Georgia,serif;font-size:19px;color:var(--navy);margin-bottom:10px}
+  .card p{font-size:14px;color:var(--ink)}
+  @media(max-width:760px){.grid3{grid-template-columns:1fr}}
+
+  /* stats */
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;text-align:center}
+  .stat .big{font-family:Georgia,serif;font-size:46px;color:var(--navy);line-height:1}
+  .stat .lab{font-size:13.5px;color:var(--mute);margin-top:8px}
+  @media(max-width:640px){.stats{grid-template-columns:1fr;gap:28px}}
+
+  /* founder */
+  .founder{display:flex;gap:26px;align-items:flex-start}
+  .avatar{flex:0 0 88px;width:88px;height:88px;border-radius:50%;background:var(--navy);color:#fff;
+    font-family:Georgia,serif;font-weight:700;font-size:30px;display:flex;align-items:center;justify-content:center}
+  .founder h3{font-family:Georgia,serif;font-size:22px;color:var(--navy);margin-bottom:2px}
+  .founder .role{color:var(--mute);font-size:14px;margin-bottom:12px}
+  .founder p{font-size:14.5px;max-width:760px}
+  @media(max-width:640px){.founder{flex-direction:column;gap:16px}}
+
+  /* footer */
+  footer{background:var(--navy);color:#fff;padding:56px 0 40px}
+  footer h2{color:#fff}
+  footer .lead{color:var(--ice)}
+  footer a.link{color:var(--amber);text-decoration:none;font-weight:600}
+  .foot-row{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-top:30px;
+    padding-top:22px;border-top:1px solid #2c4763;font-size:13px;color:var(--ice)}
+  .disc{font-size:12px;color:#8fa6bd;margin-top:22px;max-width:760px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="brand">QUT<span>VIEW</span></div>
+    <nav>
+      <a href="#what">What it does</a>
+      <a href="#why">Why it matters</a>
+      <a href="#product">Product</a>
+      <a class="nav-cta" href="https://github.com/Yoni062004/qutview" target="_blank" rel="noopener">View the code</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="kicker">Sovereign food-security risk intelligence · UAE</div>
+    <h1>The risk that price<br>monitors can't see.</h1>
+    <p class="lede">QUTVIEW maps the UAE's strategic food-import corridors — 13 essential commodities — and scores each for supplier concentration, import dependency, and price-volatility risk, turning public trade data into early warning.</p>
+    <p class="tag">Watching the structure of the supply, not just its price.</p>
+    <div class="btns">
+      <a class="btn-primary" href="#why">See what it reveals</a>
+      <a class="btn-ghost" href="https://github.com/Yoni062004/qutview" target="_blank" rel="noopener">View the code →</a>
+    </div>
+  </div>
+</div>
+
+<div class="problem">
+  <div class="wrap">
+    <div class="sec-kicker" style="color:var(--amber)">The problem</div>
+    <h2>The UAE measures food security by price. Price isn't the risk.</h2>
+    <p class="lead">The UAE imports 85–90% of its food, and its strategy aims to rank <strong>#1 in the world for food security by 2051</strong>. Yet resilience is tracked by price and reserves — not by <strong>corridor risk</strong>: how dangerously concentrated each import corridor is, and which supplier a commodity can't survive losing.</p>
+  </div>
+</div>
+
+<section id="what">
+  <div class="wrap">
+    <div class="sec-kicker">The solution</div>
+    <h2>It scores the structure of every corridor — and warns early.</h2>
+    <p class="lead">Built on public, authoritative data — UN Comtrade, the World Bank, FAOSTAT. For each corridor, automatically:</p>
+    <div class="stack">
+      <div class="step"><div class="num" style="background:var(--navy)">1</div><h4>Senses</h4><p>concentration + volatility risk</p></div>
+      <div class="step"><div class="num" style="background:var(--amber)">2</div><h4>Forecasts</h4><p>6-month price, honest error rate</p></div>
+      <div class="step"><div class="num" style="background:var(--navy)">3</div><h4>Alerts</h4><p>when a threshold trips</p></div>
+      <div class="step"><div class="num" style="background:var(--amber)">4</div><h4>Explains</h4><p>what moved, arithmetically</p></div>
+      <div class="step"><div class="num" style="background:var(--navy)">5</div><h4>Recommends</h4><p>a reviewable action + alternatives</p></div>
+    </div>
+    <p class="lead" style="margin-top:34px;margin-bottom:0">Plus an AI-written brief per corridor — <strong style="color:var(--navy)">every number machine-verified against the data before it displays</strong> — and a logged human Approve / Revise sign-off. It recommends; a person decides.</p>
+  </div>
+</section>
+
+<section id="why" class="alt">
+  <div class="wrap">
+    <div class="sec-kicker">Why it matters</div>
+    <h2>Insights nobody else surfaces — every figure from real data.</h2>
+    <p class="lead">The proof that corridor risk is a real, unwatched dimension:</p>
+    <div class="grid3">
+      <div class="card">
+        <div class="dot" style="background:var(--amber)"></div>
+        <h3>Big ≠ fragile</h3>
+        <p>Dairy is the largest food import (~$1B/yr) yet low-risk — well diversified across ~60 origins. QUTVIEW tells big from fragile, so its red flags are trusted.</p>
+      </div>
+      <div class="card">
+        <div class="dot" style="background:var(--navy)"></div>
+        <h3>The feed-dependency lens</h3>
+        <p>The UAE's "local" poultry, dairy and meat secretly run on three imported feed corridors. No other dashboard shows this cross-silo exposure.</p>
+      </div>
+      <div class="card">
+        <div class="dot" style="background:#B23B34"></div>
+        <h3>It caught its own false story</h3>
+        <p>An apparent supplier "surge" was reporting lag — the value was flat; unreported origins shrank the base. The tool corrected a narrative we believed.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="product">
+  <div class="wrap">
+    <div class="sec-kicker">The product</div>
+    <h2>A live system — built to be trusted.</h2>
+    <p class="lead">One engine, three surfaces (an interactive dashboard, a Power BI report, and grounded AI briefs), engineered so it <em>cannot</em> overclaim: every figure carries its provenance, every reconstructed year is labelled, every caveat is disclosed. For a sovereign risk tool, that credibility is the product.</p>
+    <div class="stats">
+      <div class="stat"><div class="big">13</div><div class="lab">commodities, 7 essential categories</div></div>
+      <div class="stat"><div class="big">3</div><div class="lab">surfaces: dashboard, Power BI, AI brief</div></div>
+      <div class="stat"><div class="big">100%</div><div class="lab">public, authoritative data sources</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="alt">
+  <div class="wrap">
+    <div class="sec-kicker">The team</div>
+    <div class="founder">
+      <div class="avatar">YA</div>
+      <div>
+        <h3>Yonatan Getinet Alemayehu</h3>
+        <div class="role">Founder · Management Information Systems, Minnesota State University, Mankato</div>
+        <p>Built the entire QUTVIEW platform single-handedly — data pipelines, risk model, forecasting, Power BI report, and grounded AI layer. Founder-market fit on two axes: an MIS foundation bridging the technical build and the institutional buyer, and Ethiopian heritage giving direct insight into the Horn-of-Africa supply origins that feed the UAE's food corridors.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer id="contact">
+  <div class="wrap">
+    <div class="sec-kicker" style="color:var(--amber)">Get in touch</div>
+    <h2>Built for the UAE's food-security agenda.</h2>
+    <p class="lead">QUTVIEW is the upstream corridor-risk layer for the institutions responsible for sovereign food security — the complement to price monitoring they don't yet have.</p>
+    <p style="margin-top:10px"><a class="link" href="mailto:yonatangetinet@gmail.com">yonatangetinet@gmail.com</a> &nbsp;·&nbsp; <a class="link" href="https://github.com/Yoni062004/qutview" target="_blank" rel="noopener">github.com/Yoni062004/qutview</a></p>
+    <div class="foot-row">
+      <span>© 2026 QUTVIEW · Yonatan Getinet Alemayehu</span>
+      <span>Prototype · applying to the Hub71 Access Programme</span>
+    </div>
+    <p class="disc">QUTVIEW is an early-stage prototype. Figures are derived from public data (UN Comtrade, World Bank, FAOSTAT); recent years are reconstructed from mirror statistics and labelled provisional. Decision-support only — it recommends, a human decides.</p>
+  </div>
+</footer>
+
+</body>
+</html>
