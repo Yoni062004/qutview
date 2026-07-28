@@ -101,6 +101,32 @@ def get_brief_model() -> str:
     return _read_env("ANTHROPIC_MODEL") or "claude-sonnet-5"
 
 
+def get_app_password() -> str | None:
+    """Optional password gating the dashboard (demo-grade access control,
+    not production auth). None means the dashboard is open."""
+    return _read_env("QUTVIEW_PASSWORD")
+
+
+def get_smtp_config() -> dict | None:
+    """SMTP settings for sending the alert-digest email — all from env/.env.
+    Returns None unless host + user + password are all set; the digest still
+    previews in the dashboard when unconfigured, it just can't live-send."""
+    host = _read_env("SMTP_HOST")
+    user = _read_env("SMTP_USER")
+    password = _read_env("SMTP_PASSWORD")
+    if not (host and user and password):
+        return None
+    to = _read_env("ALERT_TO") or user
+    return {
+        "host": host,
+        "port": int(_read_env("SMTP_PORT") or 587),
+        "user": user,
+        "password": password,
+        "from_addr": _read_env("ALERT_FROM") or user,
+        "to_addrs": [a.strip() for a in to.split(",") if a.strip()],
+    }
+
+
 def get_connection() -> sqlite3.Connection:
     DATA_DIR.mkdir(exist_ok=True)
     conn = sqlite3.connect(DB_PATH)

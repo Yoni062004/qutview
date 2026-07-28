@@ -11,11 +11,40 @@ import plotly.graph_objects as go
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from common import COMMODITIES, DB_PATH  # noqa: E402
+from common import (  # noqa: E402
+    COMMODITIES, DB_PATH, get_app_password, get_smtp_config,
+)
 from brief.corridor_brief import assemble_facts, generate_brief  # noqa: E402
 from features.alerts import compute_alerts  # noqa: E402
+from features.alert_email import compose_digest, send_digest  # noqa: E402
 
 st.set_page_config(page_title="QUTVIEW — Food Corridor Risk", layout="wide")
+
+
+def require_login() -> None:
+    """Optional demo-grade password gate. If QUTVIEW_PASSWORD is set in .env,
+    the dashboard asks for it once per session; if not set, the app is open
+    (open-demo mode). Not production auth — access control for a shared demo."""
+    import hmac
+
+    pw = get_app_password()
+    if not pw or st.session_state.get("qv_auth"):
+        return
+    st.title("QUTVIEW — sign in")
+    st.caption("Sovereign food-security corridor intelligence · demo access")
+    name = st.text_input("Name (optional)")
+    entered = st.text_input("Password", type="password")
+    if st.button("Sign in", type="primary"):
+        if hmac.compare_digest(entered, pw):
+            st.session_state["qv_auth"] = True
+            st.session_state["qv_user"] = name.strip() or "analyst"
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+    st.stop()
+
+
+require_login()
 
 
 @st.cache_data(ttl=300)
@@ -124,6 +153,26 @@ if alerts:
                "corridor's detail and draft brief below.")
 else:
     st.caption("No active alerts on current data.")
+
+# ---- email the alert digest (early-warning subscription) ----
+with st.expander("📧 Email alert digest — preview what subscribers receive"):
+    with sqlite3.connect(DB_PATH) as _conn:
+        _subject, _body = compose_digest(_conn)
+    st.caption(f"**Subject:** {_subject}")
+    st.text(_body)
+    _smtp = get_smtp_config()
+    if _smtp:
+        if st.button("Send digest now", key="send_digest"):
+            try:
+                send_digest(_subject, _body, _smtp)
+                st.success(f"Sent to {', '.join(_smtp['to_addrs'])}.")
+            except Exception as exc:
+                st.error(f"Send failed: {exc}")
+        st.caption(f"Configured recipient(s): {', '.join(_smtp['to_addrs'])}.")
+    else:
+        st.info("Live sending is off — set SMTP_HOST / SMTP_USER / SMTP_PASSWORD "
+                "(and ALERT_TO) in .env to enable it. See .env.example. The preview "
+                "above is exactly what would be sent.")
 
 st.divider()
 
