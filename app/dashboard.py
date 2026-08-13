@@ -15,6 +15,7 @@ from common import (  # noqa: E402
     COMMODITIES, DB_PATH, get_app_password, get_smtp_config,
 )
 from brief.corridor_brief import assemble_facts, generate_brief  # noqa: E402
+from brief.brief_pdf import build_brief_pdf  # noqa: E402
 from features.alerts import compute_alerts  # noqa: E402
 from features.alert_email import compose_digest, send_digest  # noqa: E402
 
@@ -642,10 +643,13 @@ def cached_brief(commodity_id: str, data_stamp: str):
     the same commodity on the same data."""
     with sqlite3.connect(DB_PATH) as conn:
         facts = assemble_facts(conn, commodity_id)
-    return generate_brief(facts)
+    text, mode, detail = generate_brief(facts)
+    # Return the fact dict too — the PDF export is built from it (same single
+    # source of truth as the brief), so nothing is recomputed downstream.
+    return facts, text, mode, detail
 
 
-brief_text, brief_mode, brief_detail = cached_brief(cid, data_stamp)
+facts, brief_text, brief_mode, brief_detail = cached_brief(cid, data_stamp)
 
 badge = ("🤖 LLM-GENERATED · " + brief_detail if brief_mode == "llm"
          else "📋 TEMPLATE (deterministic, no AI) · " + brief_detail)
@@ -722,9 +726,24 @@ report_md = (
        + (f" — {dec['note']}" if dec.get('note') else "")
        if dec else "not yet reviewed") + "\n"
 )
-st.download_button("⬇ Download corridor report (.md)", report_md,
-                   file_name=f"qutview_{cid}_report.md", mime="text/markdown",
-                   key=f"dl_{cid}")
+# A polished, print-ready PDF is the artifact a procurement contact can forward
+# to a director — built from the same fact dict as the brief (no recomputation),
+# with provenance and caveats carried through. The .md stays for a plain-text /
+# machine-readable copy.
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_pdf(commodity_id, stamp, vintage):
+    facts_, text_, mode_, detail_ = cached_brief(commodity_id, stamp)
+    return build_brief_pdf(facts_, text_, mode_, detail_, vintage)
+
+
+pdf_bytes = cached_pdf(cid, data_stamp, vintage_label(detail_year, detail.source))
+dl1, dl2 = st.columns(2)
+dl1.download_button("⬇ Download corridor brief (PDF)", pdf_bytes,
+                    file_name=f"QUTVIEW_{cid}_{detail_year}.pdf",
+                    mime="application/pdf", key=f"dlpdf_{cid}", width="stretch")
+dl2.download_button("⬇ Download corridor report (.md)", report_md,
+                    file_name=f"qutview_{cid}_report.md", mime="text/markdown",
+                    key=f"dl_{cid}", width="stretch")
 
 # ---------------- monthly corridor monitor (mirror data) ----------------
 st.divider()
