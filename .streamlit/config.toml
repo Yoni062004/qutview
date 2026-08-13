@@ -1,0 +1,17 @@
+# Pin the dashboard to a light theme.
+#
+# The Plotly charts hardcode a light canvas (CHART_BG in app/dashboard.py:
+# paper_bgcolor "#fcfcfb", dark text), and the Power BI report uses the same
+# light palette. Without this file Streamlit follows each VIEWER's browser
+# theme, so a dark-mode visitor got white charts with white-on-white titles
+# and legends — unreadable, and different for every viewer. Pinning light
+# makes the app render identically for everyone.
+[theme]
+base = "light"
+primaryColor = "#15324C"          # QUTVIEW navy — matches the landing page
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#EEF2F6"
+textColor = "#1B2733"
+
+[server]
+headless = true
