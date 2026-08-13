@@ -57,6 +57,23 @@ def risk_color(score: float) -> str:
     return "🔴" if score >= 50 else "🟠" if score >= 30 else "🟢"
 
 
+def md_safe(text: str) -> str:
+    """Escape '$' so Streamlit's markdown renderer doesn't treat a pair of
+    them as LaTeX math (e.g. '+$42M ... $107M' rendering as garbled italics).
+    Applied at the RENDER BOUNDARY only — never to stored strings, the
+    downloadable report, or anything the grounding check sees. Not for st.text
+    (which is literal and would show the backslash)."""
+    return text.replace("$", "\\$")
+
+
+def vintage_label(year, source: str) -> str:
+    """One consistent data-vintage label used on cards, tables and charts, so
+    UAE-reported and provisional mirror-derived years read the same everywhere.
+    Labelling only — it never changes which year is scored."""
+    return (f"{int(year)} · provisional (mirror)" if source == "mirror_derived"
+            else f"{int(year)} · UAE-reported")
+
+
 # ---------------- header ----------------
 sources = load("SELECT source_name, kind FROM data_source")
 kinds = dict(zip(sources["source_name"], sources["kind"])) if not sources.empty else {}
@@ -121,21 +138,21 @@ if alerts:
     st.subheader(f"Active alerts — {len(high_alerts)} high · {len(watch_alerts)} watch")
     if high_alerts:
         st.error("\n\n".join(
-            f"🔴 **{a['name']}** · {a['rule'].replace('_', ' ')} — {a['message']}"
+            md_safe(f"🔴 **{a['name']}** · {a['rule'].replace('_', ' ')} — {a['message']}")
             for a in high_alerts))
         # Watch level stays one click away so a page with real alarms is
         # still readable, and a page with only watch items stays calm.
         with st.expander(f"🟠 Watch-level alerts ({len(watch_alerts)})",
                          expanded=False):
             for a in watch_alerts:
-                st.markdown(f"🟠 **{a['name']}** · {a['rule'].replace('_', ' ')} — "
-                            f"{a['message']}")
+                st.markdown(md_safe(
+                    f"🟠 **{a['name']}** · {a['rule'].replace('_', ' ')} — {a['message']}"))
     elif watch_alerts:
         with st.expander(f"🟠 Watch-level alerts ({len(watch_alerts)}) — "
                          f"no high alerts", expanded=False):
             for a in watch_alerts:
-                st.markdown(f"🟠 **{a['name']}** · {a['rule'].replace('_', ' ')} — "
-                            f"{a['message']}")
+                st.markdown(md_safe(
+                    f"🟠 **{a['name']}** · {a['rule'].replace('_', ' ')} — {a['message']}"))
 
     # One click to the corridor's detail + A1 brief below (which carry the
     # why and the recommended action — not duplicated here).
@@ -154,25 +171,29 @@ if alerts:
 else:
     st.caption("No active alerts on current data.")
 
-# ---- email the alert digest (early-warning subscription) ----
-with st.expander("📧 Email alert digest — preview what subscribers receive"):
-    with sqlite3.connect(DB_PATH) as _conn:
-        _subject, _body = compose_digest(_conn)
-    st.caption(f"**Subject:** {_subject}")
-    st.text(_body)
-    _smtp = get_smtp_config()
-    if _smtp:
-        if st.button("Send digest now", key="send_digest"):
-            try:
-                send_digest(_subject, _body, _smtp)
-                st.success(f"Sent to {', '.join(_smtp['to_addrs'])}.")
-            except Exception as exc:
-                st.error(f"Send failed: {exc}")
-        st.caption(f"Configured recipient(s): {', '.join(_smtp['to_addrs'])}.")
-    else:
-        st.info("Live sending is off — set SMTP_HOST / SMTP_USER / SMTP_PASSWORD "
-                "(and ALERT_TO) in .env to enable it. See .env.example. The preview "
-                "above is exactly what would be sent.")
+# ---- email the alert digest — an admin/demo feature, kept in the sidebar so
+# it stays out of the corridor analysis flow ----
+with st.sidebar:
+    st.header("Admin")
+    with st.expander("📧 Email alert digest", expanded=False):
+        st.caption("Preview of the early-warning email subscribers receive.")
+        with sqlite3.connect(DB_PATH) as _conn:
+            _subject, _body = compose_digest(_conn)
+        st.caption(f"**Subject:** {_subject}")
+        st.text(_body)
+        _smtp = get_smtp_config()
+        if _smtp:
+            if st.button("Send digest now", key="send_digest"):
+                try:
+                    send_digest(_subject, _body, _smtp)
+                    st.success(f"Sent to {', '.join(_smtp['to_addrs'])}.")
+                except Exception as exc:
+                    st.error(f"Send failed: {exc}")
+            st.caption(f"Recipient(s): {', '.join(_smtp['to_addrs'])}.")
+        else:
+            st.info("Live sending is off — set SMTP_HOST / SMTP_USER / "
+                    "SMTP_PASSWORD (and ALERT_TO) in .env to enable it. "
+                    "The preview above is exactly what would be sent.")
 
 st.divider()
 
@@ -185,11 +206,8 @@ for start in range(0, len(rows_list), PER_ROW):
     for col, (_, row) in zip(cols, rows_list[start:start + PER_ROW]):
         year = int(row.year)
         mirror = row.source == "mirror_derived"
-        # Keep the label short enough that st.metric doesn't truncate it —
-        # the ⓘ tooltip and the caption below carry the mirror-derived detail.
-        label = f"{risk_color(row.composite_risk)} {row['name']} — {year}"
-        if mirror:
-            label += " (provisional)"
+        # Consistent vintage suffix (same on cards, detail, charts, tables).
+        label = f"{risk_color(row.composite_risk)} {row['name']} — {vintage_label(year, row.source)}"
         help_txt = None
         gate = gate_cov.get(row.commodity_id)
         if mirror and gate:
@@ -309,8 +327,7 @@ for fcid in FEED_COMMODITIES:
         "Import dependency": f"{dep.dependency_pct:.0f}%" if dep is not None else "n/a",
         "Corridor risk": f"{r0.composite_risk:.0f} / 100",
         "Top origin (concentration)": f"{r0.top_origin} {r0.top_origin_share*100:.0f}%",
-        "Data year": f"{int(r0.year)}"
-                     + (" (provisional)" if r0.source == "mirror_derived" else " (UAE-reported)"),
+        "Data year": vintage_label(r0.year, r0.source),
     })
 st.caption("QUTVIEW-computed corridor figures for the UAE's animal-feed imports "
            "(the complete feed complex — energy grain, protein meal, and barley):")
@@ -343,10 +360,7 @@ detail_mirror = detail.source == "mirror_derived"
 left, right = st.columns([1, 2])
 
 with left:
-    st.markdown(
-        f"### {COMMODITIES[cid]['name']} — {detail_year}"
-        + (" *(provisional, mirror-derived)*" if detail_mirror else "")
-    )
+    st.markdown(f"### {COMMODITIES[cid]['name']} — {vintage_label(detail_year, detail.source)}")
     if cid == "dairy":
         st.caption(
             "**Scope & price basis (dairy):** the corridor is milk powder (HS 0402), "
@@ -429,9 +443,9 @@ with left:
         orientation="h",
     ))
     fig.update_layout(
-        title=f"Import value by origin, {detail_year} (USD millions"
-              + (", origin-reported)" if detail_mirror else ")"),
-        height=320, margin=dict(l=10, r=10, t=40, b=10),
+        title=f"Import value by origin · {vintage_label(detail_year, detail.source)}",
+        xaxis_title="Import value ($M)",
+        height=340, margin=dict(l=120, r=20, t=44, b=44),
         yaxis=dict(autorange="reversed"),
     )
     st.plotly_chart(fig, width="stretch")
@@ -541,21 +555,22 @@ def render_what_moved(drivers: dict) -> None:
         for m in fd["risers"][:2]:
             pct = f"{m['change_pct']:+.0f}%" if m["change_pct"] is not None else "new"
             gains.append(f"{m['origin']} {pct} (+${m['change_usd']/1e6:.0f}M)")
-        st.markdown(f"**Flow attribution ({fd['prev_year']}→{fd['latest_year']} supply "
-                    f"mix):** " + inc_txt
-                    + (("; top gains: " + ", ".join(gains)) if gains else ""))
+        st.markdown(md_safe(
+            f"**Flow attribution ({fd['prev_year']}→{fd['latest_year']} supply "
+            f"mix):** " + inc_txt
+            + (("; top gains: " + ", ".join(gains)) if gains else "")))
         unrep = fd["unreported"]
         if unrep:
             named = ", ".join(o["origin"] for o in unrep["origins"][:3])
             named_val = sum(o["prev_value"] for o in unrep["origins"][:3])
-            st.warning(
+            st.warning(md_safe(
                 f"**Reporting-lag guard:** {unrep['count']} origins "
                 f"(${unrep['prev_value_usd']/1e6:.0f}M in {fd['prev_year']}) have no "
                 f"{fd['latest_year']} data yet — including {named} "
                 f"(${named_val/1e6:.0f}M of the ${unrep['prev_value_usd']/1e6:.0f}M). "
                 f"Excluded from decline attribution as likely reporting lag, not real "
                 f"exits — so an apparent concentration rise or origin shift here is "
-                f"provisional.")
+                f"provisional."))
 
 
 st.divider()
@@ -758,10 +773,18 @@ else:
                 line=dict(width=0.5, color=ORIGIN_COLORS[i % len(ORIGIN_COLORS)]),
             ))
         fig3.update_layout(
-            title="Monthly UAE-bound flows by origin (USD millions, origin-reported)",
-            height=420, margin=dict(l=10, r=10, t=40, b=10), **CHART_BG,
+            title="Who supplies this commodity, month by month",
+            xaxis_title="Month", yaxis_title="Import value ($M)",
+            height=460, margin=dict(l=64, r=20, t=48, b=96),
+            showlegend=True,
+            legend=dict(title="Origin", orientation="h", yanchor="top", y=-0.28,
+                        xanchor="left", x=0),
+            **CHART_BG,
         )
         st.plotly_chart(fig3, width="stretch")
+        st.caption("Monthly mirror-derived flows by origin (top corridors, "
+                   "origin-reported). Each band is one origin country — colour maps "
+                   "to the country in the legend.")
 
     with risk_col:
         if not mrisk.empty:
@@ -779,11 +802,13 @@ else:
                 line=dict(width=2, color="#0072B2"),
             ))
             fig4.update_layout(
-                title="Rolling 12-month composite risk (0–100)",
-                height=330, margin=dict(l=10, r=10, t=40, b=10),
+                title="Is corridor risk rising or falling?",
+                xaxis_title="Month", yaxis_title="Risk score (0–100)",
+                height=360, margin=dict(l=64, r=20, t=48, b=52),
                 yaxis=dict(range=[0, 100]), **CHART_BG,
             )
             st.plotly_chart(fig4, width="stretch")
+            st.caption("Rolling 12-month composite risk (0–100).")
 
     if not cov.empty and pd.notna(cov.coverage_pct[0]):
         st.caption(
