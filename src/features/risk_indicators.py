@@ -26,7 +26,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common import get_connection
+from common import at_least, get_connection
 
 # Composite weights: concentration is the core sovereign-risk signal.
 W_HHI, W_TOP_SHARE, W_VOLATILITY = 0.5, 0.3, 0.2
@@ -70,7 +70,7 @@ def mirror_extension(conn, imports: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         ]
         if extra.empty:
             continue
-        if gate.coverage_pct < MIN_MIRROR_COVERAGE_PCT:
+        if not at_least(gate.coverage_pct, MIN_MIRROR_COVERAGE_PCT):
             excluded[cid] = (int(gate.year), float(gate.coverage_pct))
             continue
         extension.append(extra)

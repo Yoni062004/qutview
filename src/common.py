@@ -65,6 +65,25 @@ COMMODITIES = {
 }
 
 
+# Threshold comparisons on COMPUTED values (shares, deltas, percentages,
+# weighted scores) must not hinge on binary float noise: 0.60 - 0.55 is
+# 0.04999... and 100 * 3.15 / 3 - 100 is 4.99..., so a value exactly at a
+# threshold on paper can land a hair under it and silently not fire. The
+# difference is rounded to THRESHOLD_PLACES decimals — far below any precision
+# QUTVIEW displays — so "at the threshold" means at it.
+THRESHOLD_PLACES = 9
+
+
+def at_least(value: float, threshold: float) -> bool:
+    """value >= threshold, robust to float noise."""
+    return round(value - threshold, THRESHOLD_PLACES) >= 0
+
+
+def at_most(value: float, threshold: float) -> bool:
+    """value <= threshold, robust to float noise."""
+    return round(value - threshold, THRESHOLD_PLACES) <= 0
+
+
 def _read_env(name: str) -> str | None:
     """Read a setting from the environment or the project-root .env file.
     Placeholder values from .env.example ('paste_your_key_here') count as

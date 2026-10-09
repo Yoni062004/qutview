@@ -110,10 +110,14 @@ This is the part most tools skip, and it's what makes QUTVIEW credible:
 - **Every year is labelled UAE-reported or mirror-derived.** Reconstructed years
   are marked **"provisional."** Nothing is dressed up as more certain than it is.
 - **The coverage gate** (§4) refuses to score corridors it can't see clearly.
-- **Grounding.** The AI brief (§10) can *only* use numbers pulled from the
-  database. A mechanical check verifies every figure in the AI's text traces to
-  a real value — if one doesn't, the whole output is rejected and the offline
-  template is shown instead. **A fabricated number can never reach the screen.**
+- **Grounding.** The AI brief (§10) doesn't calculate anything: every figure
+  is computed from the database *before* the AI runs, and the AI only rephrases
+  that prepared material. A grounding check then verifies every figure against
+  the source data as a second layer — if one fails, the whole output is
+  rejected and the offline template is shown instead. The check is a strong
+  filter, not a proof (a made-up whole number can occasionally match an
+  unrelated real value by coincidence); the real guarantee is that the numbers
+  are fixed before the AI ever sees them.
 - **Honest forecasts.** We report the model's *real* error rate, not a claim of
   accuracy (see §7).
 

@@ -25,6 +25,7 @@ def _seed(db, cid="wheat", coverage=None):
     (74.9, False),
     (74.99, False),
     (75.0, True),    # "at least" 75% — the threshold itself passes
+    (100 * 16.08 / 21.44, True),   # 75% on paper, 74.99999999999999 in binary
     (75.1, True),
     (100.0, True),
 ])

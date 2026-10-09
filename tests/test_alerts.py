@@ -40,6 +40,8 @@ def test_documented_thresholds():
 
 @pytest.mark.parametrize("share, expected", [
     (0.5999, None),
+    (0.9 - 0.3, "watch"),          # 0.6 on paper, 0.6000000000000001 in binary
+    (0.94 - 0.34, "watch"),        # 0.6 on paper, 0.5999999999999999 in binary
     (0.60, "watch"),
     (0.6001, "watch"),
     (0.7999, "watch"),
@@ -53,6 +55,8 @@ def test_concentration_boundaries(run_alerts, share, expected):
 
 @pytest.mark.parametrize("risk, expected", [
     (44.9, None),
+    (44.999999, None),
+    (100 * (0.5 * 0.0 + 0.3 * 0.94 + 0.2 * 0.84), "watch"),  # 45 on paper
     (45.0, "watch"),
     (45.1, "watch"),
     (64.9, "watch"),
@@ -91,7 +95,11 @@ def test_high_sorts_before_watch(run_alerts):
     assert [a["severity"] for a in feed] == ["high", "watch"]
 
 
-@pytest.mark.parametrize("change, fires", [(4.9, False), (5.0, True), (8.0, True)])
+@pytest.mark.parametrize("change, fires", [
+    (4.9, False), (5.0, True), (8.0, True),
+    (64.1 - 59.1, True),          # computed: 4.99999999999999...
+    (4.999999, False),            # genuinely under: not swallowed by rounding
+])
 def test_rising_trend_boundary(run_alerts, change, fires):
     monthly = {"direction": "rising", "change": change, "change_window_months": 6,
                "latest_period": "2026-06", "latest_risk": 50}
@@ -99,18 +107,14 @@ def test_rising_trend_boundary(run_alerts, change, fires):
     assert any(a["rule"] == "rising_trend" for a in feed) is fires
 
 
-_FLOAT_BOUNDARY = pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "BUG (low impact): delta = share - prev_share is compared to 0.05 with no "
-    "tolerance, so a rise of exactly 5 points fires or not depending on float "
-    "noise: 0.60-0.55 = 0.04999... (does not fire), 0.65-0.60 = 0.05000...04 "
-    "(fires). The message would print '+5 pts (threshold +5)' yet not alert."))
-
-
+# Was a float bug: 0.60 - 0.55 is 0.04999... in binary, so a rise of exactly 5
+# points did not fire while 0.65 - 0.60 did.
 @pytest.mark.parametrize("share, prev_share, fires", [
     (0.60, 0.5501, False),
     (0.65, 0.60, True),
-    pytest.param(0.60, 0.55, True, marks=_FLOAT_BOUNDARY),
-    pytest.param(0.70, 0.65, True, marks=_FLOAT_BOUNDARY),
+    (0.60, 0.55, True),
+    (0.70, 0.65, True),
+    (0.21, 0.16, True),
 ])
 def test_yoy_concentration_climbing_boundary(run_alerts, share, prev_share, fires):
     prev = {"year": 2023, "composite_risk": 30, "top_origin": "Brazil",

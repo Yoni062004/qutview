@@ -17,6 +17,17 @@ non-zero (`refresh_all.py` then reports the run as incomplete). Sample data is
 never written over live data — use `--sample` for an offline demo, and the
 dashboard's LIVE / SAMPLE provenance badge shows which you are looking at.
 
+**Out-of-the-box sample prices (intentional).** The repo ships with a populated
+`data/qutview.db`, so a clone runs on real data immediately. If you instead
+build a database from scratch (e.g. delete `data/qutview.db` and run
+`init_db.py`) and the World Bank Pink Sheet download is unavailable,
+`worldbank_prices.py` fills the **empty** price table with clearly labelled
+sample prices (provenance `sample`, shown as SAMPLE on the dashboard) so the
+app is runnable. This only ever happens when the price table is empty: it
+never overwrites real prices, and once any prices exist a failed download
+keeps them and exits non-zero. Import flows have no such fallback — run
+`comtrade_imports.py --sample` for an offline demo database.
+
 ## Quick start
 
 ```powershell
@@ -54,6 +65,12 @@ python scripts/export_powerbi.py     # then follow docs/powerbi_guide.md
 #    Also shown on the dashboard for the selected commodity.
 python src/brief/corridor_brief.py wheat        # add --facts to audit numbers
 ```
+
+**How the brief stays grounded.** Figures are computed deterministically in assemble_facts() before the model runs; the LLM rephrases a prepared narrative rather than deriving numbers. A grounding check then verifies every figure against the source data as a second layer, and any brief that fails falls back to a deterministic template. The check is a strong filter, not a
+proof: periods must match exactly, years to within one of a fact year, and
+decimals to rounding precision, but an invented whole number can occasionally
+match an unrelated fact by coincidence (documented in
+`tests/test_grounding.py`).
 
 Refreshing later: `python scripts/refresh_all.py` re-pulls all sources and
 re-exports the Power BI CSVs; then open [docs/QUTVIEW.pbix](docs/QUTVIEW.pbix)

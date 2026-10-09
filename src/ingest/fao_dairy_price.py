@@ -131,6 +131,9 @@ def main() -> None:
         sys.exit(1)
 
     inserted = store_rows(conn, rows)
+    # Freshness/provenance, like every other source: the dashboard badge and
+    # the data stamp (which ties analyst sign-offs to a data version) read it.
+    record_data_source(conn, "prices_dairy", "live")
     newest = max(p for p, _, _ in rows)
     print(f"Loaded {inserted} FAO Dairy Price Index points (latest month: {newest}, "
           f"value {dict((p, v) for p, _, v in rows)[newest]:.1f}; index 2014-16=100).")

@@ -196,32 +196,82 @@ def test_rounding_within_half_a_unit_passes(facts):
     cb.verify_grounding(f"{risk:.0f}/100 and {risk:.2f}/100", facts)
 
 
-# --- known weaknesses (left failing on purpose) ------------------------------
+# --- years: exact, with +/-1 slack only -----------------------------------
 
 
-@pytest.mark.xfail(strict=True, raises=pytest.fail.Exception, reason=(
-    "WEAKNESS: tolerance is max(half-unit, 1.5% of the number). For a year that "
-    "is +/-30, so any year 1995..2055 traces to a fact year: an LLM writing "
-    "'by 2030' or 'since 2015' passes the grounding check."))
 @pytest.mark.parametrize("claim", ["Supply will tighten by 2030.",
-                                   "The worst level since 2015."])
+                                   "The worst level since 2015.",
+                                   "Unchanged since 2021."])
 def test_fabricated_year_is_rejected(facts, claim):
+    # Fact years in this fixture: 2023-2026. Was a hole: any year within +/-30
+    # of a fact year passed under the old 1.5% relative tolerance.
     with pytest.raises(ValueError):
         cb.verify_grounding(claim, facts)
 
 
-@pytest.mark.xfail(strict=True, raises=pytest.fail.Exception, reason=(
-    "WEAKNESS: the docstring says a d-decimal token may be off by half a unit "
-    "in its last decimal, 'or 1.5% for round-number phrasing', but the code "
-    "applies the 1.5% to decimal tokens too. A risk of 62.4 can be quoted as "
-    "61.5 and pass - a precise-looking misquote, not rounding."))
-def test_decimal_misquote_is_rejected(db, score):
+@pytest.mark.parametrize("year", [2022, 2023, 2026, 2027])
+def test_year_within_one_of_a_fact_year_passes(facts, year):
+    # "last year" / "next year" phrasing around the 2023-2026 fact years.
+    cb.verify_grounding(f"compared with {year}", facts)
+
+
+def test_year_like_amount_still_passes_when_it_is_a_fact_value(facts_factory):
+    # "$2,031M" tokenizes as 2031 — an amount, not a year. It must pass on an
+    # exact (rounding) match even though 2031 is far from any fact year...
+    f = facts_factory(year=2024)
+    f["total_import_value_usd"] = 2_031.4e6
+    cb.verify_grounding("total $2,031M in 2024", f)
+    # ...but not on the loose 1.5% integer tolerance.
+    with pytest.raises(ValueError):
+        cb.verify_grounding("total $2,040M in 2024", f)
+
+
+# --- decimals: rounding-only ---------------------------------------------------
+
+
+@pytest.fixture
+def sparse_facts(db, score):
     db.add_flows("fact_imports", 2023, "wheat", {"A": 624, "B": 376})
-    s = score()
-    risk = s[(2023, "wheat")]["composite_risk"]  # 100*(.5*.53+.3*.624) = 45.2
+    score()
     conn = db.connect()
     f = cb.assemble_facts(conn, "wheat")
     conn.close()
-    cb.verify_grounding(f"risk {risk:.1f}/100", f)  # sanity: true value passes
+    return f
+
+
+def test_decimal_misquote_is_rejected(sparse_facts):
+    # Was a hole: 1.5% applied to decimals too, so 62.4 could be quoted as 61.5.
+    risk = sparse_facts["risk_latest"]["composite_risk"]  # 100*(.5*.53+.3*.624)
+    cb.verify_grounding(f"risk {risk:.1f}/100", sparse_facts)
     with pytest.raises(ValueError):
-        cb.verify_grounding(f"risk {risk - 0.6:.1f}/100", f)
+        cb.verify_grounding(f"risk {risk - 0.6:.1f}/100", sparse_facts)
+
+
+@pytest.mark.parametrize("fmt", ["{:.1f}", "{:.2f}", "{:.3f}"])
+def test_decimal_rounding_of_a_fact_passes(sparse_facts, fmt):
+    risk = sparse_facts["risk_latest"]["composite_risk"]
+    cb.verify_grounding(fmt.format(risk), sparse_facts)
+
+
+@pytest.mark.parametrize("offset", [0.1, -0.1])
+def test_decimal_one_step_off_is_rejected(sparse_facts, offset):
+    risk = sparse_facts["risk_latest"]["composite_risk"]
+    with pytest.raises(ValueError):
+        cb.verify_grounding(f"{round(risk, 1) + offset:.1f}", sparse_facts)
+
+
+# --- integers: accepted limitation (left failing on purpose) -----------------
+
+
+@pytest.mark.xfail(strict=True, raises=pytest.fail.Exception, reason=(
+    "ACCEPTED LIMITATION, NOT A BUG TO FIX: integers keep a 1.5% tolerance for "
+    "round-number phrasing ('$900M' for 902M). A fact dict holds dozens of values "
+    "at five scalings, so an invented integer can coincidentally land within "
+    "tolerance and pass; tightening this would reject valid briefs. The real "
+    "guarantee is architectural (figures computed in assemble_facts() before the "
+    "model runs). Keep this test: it documents the limit honestly."))
+def test_invented_integer_near_a_fact_is_rejected(facts):
+    total_m = facts["total_import_value_usd"] / 1e6
+    invented = round(total_m * 1.012)  # 1.2% off: not rounding, still passes
+    with pytest.raises(ValueError):
+        cb.verify_grounding(f"total imports ${invented}M", facts)

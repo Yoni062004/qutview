@@ -24,7 +24,7 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common import YEARS, get_connection
+from common import YEARS, get_connection, record_data_source
 
 CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=PBARLUSDM"
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -94,6 +94,9 @@ def main() -> None:
         sys.exit(1)
 
     inserted = store_rows(conn, rows)
+    # Freshness/provenance, like every other source: the dashboard badge and
+    # the data stamp (which ties analyst sign-offs to a data version) read it.
+    record_data_source(conn, "prices_barley", "live")
     newest = max(p for p, _, _ in rows)
     latest_price = dict((p, v) for p, _, v in rows)[newest]
     print(f"Loaded {inserted} barley price points (latest month: {newest}, "

@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common import COMMODITIES, get_connection
+from common import COMMODITIES, at_least, get_connection
 from brief.corridor_brief import assemble_facts, concentration_driver_note
 
 # Thresholds — named so they can be tuned and defended, not buried in logic.
@@ -68,8 +68,8 @@ def compute_alerts(conn) -> list[dict]:
         risk = r["composite_risk"]
 
         # Rule 1 — single-source exposure
-        if share >= CONCENTRATION_WATCH:
-            severity = "high" if share >= CONCENTRATION_HIGH else "watch"
+        if at_least(share, CONCENTRATION_WATCH):
+            severity = "high" if at_least(share, CONCENTRATION_HIGH) else "watch"
             line = CONCENTRATION_HIGH if severity == "high" else CONCENTRATION_WATCH
             alerts.append(_alert(
                 base, severity, "single_source",
@@ -78,8 +78,8 @@ def compute_alerts(conn) -> list[dict]:
                 share * 100))
 
         # Rule 2 — elevated corridor risk
-        if risk >= RISK_WATCH:
-            severity = "high" if risk >= RISK_HIGH else "watch"
+        if at_least(risk, RISK_WATCH):
+            severity = "high" if at_least(risk, RISK_HIGH) else "watch"
             line = RISK_HIGH if severity == "high" else RISK_WATCH
             alerts.append(_alert(
                 base, severity, "elevated_risk",
@@ -91,7 +91,7 @@ def compute_alerts(conn) -> list[dict]:
         # monitor's level is not comparable to the annual score)
         m = facts["monthly_trend"]
         if (m and m["direction"] == "rising" and m["change"] is not None
-                and m["change"] >= MONTHLY_RISE_PTS):
+                and at_least(m["change"], MONTHLY_RISE_PTS)):
             alerts.append(_alert(
                 base, "watch", "rising_trend",
                 f"rolling monitor up +{m['change']:.1f} pts over "
@@ -111,7 +111,7 @@ def compute_alerts(conn) -> list[dict]:
         driver_suffix = f" — {driver}" if driver else ""
         if p and p.get("top_origin_share") is not None:
             delta = share - p["top_origin_share"]
-            if delta >= YOY_SHARE_RISE_PTS:
+            if at_least(delta, YOY_SHARE_RISE_PTS):
                 if r["top_origin"] == p["top_origin"]:
                     alerts.append(_alert(
                         base, "watch", "concentration_climbing",

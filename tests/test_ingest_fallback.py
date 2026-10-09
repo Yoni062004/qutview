@@ -129,6 +129,41 @@ def test_failed_fetch_does_not_touch_provenance(db, point_at, monkeypatch, name,
     assert sorted(db.query("SELECT * FROM data_source")) == before
 
 
+@pytest.mark.parametrize("name, cid, row", [
+    ("fred_barley_price", "barley", ("2026-08", "barley", 215.0)),
+    ("fred_lentils_price", "lentils", ("2026-08", "lentils", 182.0)),
+    ("fao_dairy_price", "dairy", ("2026-08", "dairy", 141.0)),
+])
+def test_price_ingest_records_freshness(db, point_at, monkeypatch, name, cid, row):
+    # Was a provenance gap: these sources never wrote data_source, so the app
+    # could not show how old their prices were.
+    code = _run_with_fetch(monkeypatch, point_at, name, lambda: [row])
+    assert code in (0, None)
+    rows = db.query("SELECT kind, loaded_at FROM data_source WHERE source_name = ?",
+                    (f"prices_{cid}",))
+    assert len(rows) == 1 and rows[0][0] == "live" and rows[0][1]
+
+
+@pytest.mark.parametrize("name", ["fred_barley_price", "fred_lentils_price",
+                                  "fao_dairy_price"])
+def test_failed_price_ingest_leaves_freshness_alone(db, point_at, monkeypatch, name):
+    _seed(db, name)
+    before = sorted(db.query("SELECT * FROM data_source"))
+    _run_with_fetch(monkeypatch, point_at, name, _empty)
+    assert sorted(db.query("SELECT * FROM data_source")) == before
+
+
+def test_worldbank_seeds_sample_only_into_an_empty_price_table(db, point_at, monkeypatch):
+    # INTENTIONAL (documented in README): a database built from scratch, with the
+    # Pink Sheet unreachable, gets clearly labelled sample prices so the app runs.
+    # Real prices are never overwritten — see test_empty_fetch_leaves_existing_
+    # data_untouched[worldbank_prices].
+    code = _run_with_fetch(monkeypatch, point_at, "worldbank_prices", _empty)
+    assert code in (0, None)
+    assert db.query("SELECT count(*) FROM fact_prices")[0][0] > 0
+    assert db.query("SELECT kind FROM data_source WHERE source_name = 'prices'") ==         [("sample",)]
+
+
 def test_comtrade_sample_only_via_explicit_flag(db, point_at, monkeypatch):
     # The offline demo path still works — but only when asked for.
     point_at(comtrade_imports)

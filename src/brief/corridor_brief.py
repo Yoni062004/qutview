@@ -13,11 +13,17 @@ per commodity corridor. Two clean layers, kept strictly separate:
        ANTHROPIC_API_KEY in .env, model from ANTHROPIC_MODEL (default
        claude-sonnet-5). The model receives ONLY the fact dict and a
        system prompt that forbids inventing numbers. No sampling
-       parameters are sent — current Claude models reject them; instead
-       every LLM brief passes a mechanical GROUNDING CHECK: each number
-       in the text must trace to a fact-dict value (allowing the brief's
-       rounding and unit scaling), or the output is rejected and the
-       deterministic template is used, with the reason surfaced.
+       parameters are sent — current Claude models reject them.
+
+     Where the guarantee comes from: figures are computed deterministically
+     in assemble_facts() before the model runs; the LLM rephrases a
+     prepared narrative (e.g. drivers.what_moved_note) rather than deriving
+     numbers. A GROUNDING CHECK (verify_grounding) then verifies every
+     figure against the fact dict as a second layer, and any brief that
+     fails falls back to the deterministic template, with the reason
+     surfaced. The check is a strong filter, not a proof: an invented
+     integer can coincidentally match an unrelated fact within rounding
+     tolerance (see verify_grounding's KNOWN LIMITATION).
      - Template mode (fallback): a deterministic rule-based text builder,
        so the module always runs offline (same philosophy as the
        sample-data fallbacks elsewhere in the project). Used when no key
@@ -45,7 +51,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from common import COMMODITIES, get_anthropic_key, get_brief_model, get_connection
+from common import (COMMODITIES, at_least, at_most, get_anthropic_key,
+                    get_brief_model, get_connection)
 from features.risk_indicators import MIN_MIRROR_COVERAGE_PCT
 
 # Non-negotiable framing rule. Baked into the template output below and
@@ -210,7 +217,7 @@ def _build_alternatives(conn, cid, flows_table, latest_year, top_origin, total_v
             continue
         value, weight = yv[latest_year]
         share = value / total_value if total_value else 0.0
-        if share < ALT_MEANINGFUL_SHARE:
+        if not at_least(share, ALT_MEANINGFUL_SHARE):
             continue
         candidates.append({
             "origin": name,
@@ -257,13 +264,13 @@ def _shift_period(period, months):
 def _classify_momentum(frac):
     if frac is None:
         return None
-    if frac >= MOM_SHARP_RISE:
+    if at_least(frac, MOM_SHARP_RISE):
         return "sharp rise"
-    if frac >= MOM_RISE:
+    if at_least(frac, MOM_RISE):
         return "rising"
-    if frac <= MOM_SHARP_FALL:
+    if at_most(frac, MOM_SHARP_FALL):
         return "sharp fall"
-    if frac <= MOM_FALL:
+    if at_most(frac, MOM_FALL):
         return "falling"
     return "stable"
 
@@ -389,8 +396,8 @@ def assemble_facts(conn, cid: str) -> dict:
             "change_window_months": 6 if six_m else (1 if prev_m else None),
             "change": change,
             "direction": (None if change is None else
-                          "rising" if change > 1 else
-                          "falling" if change < -1 else "stable"),
+                          "rising" if not at_most(change, 1) else
+                          "falling" if not at_least(change, -1) else "stable"),
         }
     else:
         gaps.append("no monthly rolling risk series (mirror monitor not loaded)")
@@ -442,7 +449,8 @@ def assemble_facts(conn, cid: str) -> dict:
         forecast = {
             "end_period": fc["period"], "value": fc["forecast"],
             "pct_vs_latest_price": pct,
-            "direction": "rising" if pct > 1 else "falling" if pct < -1 else "roughly flat",
+            "direction": "rising" if not at_most(pct, 1) else
+                         "falling" if not at_least(pct, -1) else "roughly flat",
         }
     else:
         gaps.append("no price forecast")
@@ -483,7 +491,7 @@ def assemble_facts(conn, cid: str) -> dict:
                 "gate_year": gate["year"],
                 "coverage_pct": gate["coverage_pct"],
                 "threshold_pct": MIN_MIRROR_COVERAGE_PCT,
-                "passed": gate["coverage_pct"] >= MIN_MIRROR_COVERAGE_PCT,
+                "passed": at_least(gate["coverage_pct"], MIN_MIRROR_COVERAGE_PCT),
             }),
             "newer_mirror_years_unscored": newer_mirror_years,
         },
@@ -538,7 +546,7 @@ def concentration_driver_note(f: dict):
                 f"reporting lag, so the apparent shift is provisional{riser}")
 
     inc_flat = (inc and inc["change_pct"] is not None
-                and abs(inc["change_pct"]) < FLAT_INCUMBENT_PCT)
+                and not at_least(abs(inc["change_pct"]), FLAT_INCUMBENT_PCT))
     if inc_flat and unrep:
         # Case 2 — Poultry: share rose but the incumbent was flat, so the rise
         # is the shrinking denominator from origins that have not reported yet.
@@ -552,24 +560,24 @@ def concentration_driver_note(f: dict):
     # collapsed market must NOT get top billing.
     r0 = fd["risers"][0] if fd["risers"] else None
     tp, tl = fd.get("total_prev"), fd.get("total_latest")
-    r0_material = (r0 is not None and r0["change_usd"] >= MATERIAL_RISER_USD
-                   and tl and r0["change_usd"] >= MATERIAL_RISER_SHARE * tl)
+    r0_material = (r0 is not None and at_least(r0["change_usd"], MATERIAL_RISER_USD)
+                   and tl and at_least(r0["change_usd"], MATERIAL_RISER_SHARE * tl))
     if r0_material:
         rp = f"+{r0['change_pct']:.0f}%" if r0["change_pct"] is not None else "new supplier"
         bits = [f"{r0['origin']} {rp} (+${_m(r0['change_usd'])})"]
-        if inc and inc["change_pct"] is not None and inc["change_pct"] <= -FLAT_INCUMBENT_PCT:
+        if inc and inc["change_pct"] is not None and at_most(inc["change_pct"], -FLAT_INCUMBENT_PCT):
             bits.append(f"{inc['origin']} {inc['change_pct']:+.0f}%")
         # Anchor the flow window so the (possibly older) data-year change is never
         # conflated with the current-month price momentum beside it.
         note = ("driven by " + ", ".join(bits)
                 + f" in the {fd['prev_year']}->{fd['latest_year']} supply mix")
-    elif tp and tl and tl <= tp * (1 - MARKET_CONTRACTION_PCT):
+    elif tp and tl and at_most(tl, tp * (1 - MARKET_CONTRACTION_PCT)):
         # No origin grew materially and the reported market shrank — the
         # contraction is the story, not the noise.
         note = (f"the {fd['latest_year']} reported market contracted "
                 f"{(tp - tl) / tp * 100:.0f}% (${_m(tp)}->${_m(tl)}), likely reporting "
                 f"lag; no origin grew materially")
-    elif inc and inc["change_pct"] is not None and abs(inc["change_pct"]) >= FLAT_INCUMBENT_PCT:
+    elif inc and inc["change_pct"] is not None and at_least(abs(inc["change_pct"]), FLAT_INCUMBENT_PCT):
         # No material riser, market not contracted: describe the incumbent move.
         note = (f"{inc['origin']} {inc['change_pct']:+.0f}% in the "
                 f"{fd['prev_year']}->{fd['latest_year']} supply mix; no origin grew "
@@ -593,9 +601,9 @@ def _momentum_context(mo) -> str | None:
     cls, m6, m12 = mo["class_6mo"], mo["m6_pct"], mo["m12_pct"]
     if cls in ("sharp rise", "rising", "sharp fall", "falling"):
         extra = (f", {m12:+.0f}% over 12 months"
-                 if m12 is not None and abs(m12) >= MOM_SHARP_RISE * 100 else "")
+                 if m12 is not None and at_least(abs(m12), MOM_SHARP_RISE * 100) else "")
         return f"accompanied by a {m6:+.0f}% 6-month price move ({cls}{extra})"
-    if m12 is not None and abs(m12) >= MOM_12MO_MATERIAL * 100:
+    if m12 is not None and at_least(abs(m12), MOM_12MO_MATERIAL * 100):
         return (f"the 6-month price was broadly stable but moved {m12:+.0f}% over 12 "
                 f"months (price context, not a driver of concentration)")
     return "the world price was broadly stable"
@@ -632,7 +640,7 @@ def _pick_action(f: dict) -> str:
                 f"(top origin {top['origin']}, {top['share']*100:.0f}% of value) cannot "
                 f"be confirmed from trade data for "
                 f"{'/'.join(str(y) for y in f['provenance']['newer_mirror_years_unscored'])}.")
-    if top and top["share"] >= 0.60:
+    if top and at_least(top["share"], 0.60):
         alts = f["alternatives"]
         lead = (f"Qualify a second origin for {f['commodity']['name'].lower()} — "
                 f"{top['origin']} supplied {top['share']*100:.0f}% of "
@@ -647,12 +655,12 @@ def _pick_action(f: dict) -> str:
         return lead + " No proven alternative corridor exists in current trade data " \
                       "(all other origins under 1%)."
     if (f["monthly_trend"] and f["monthly_trend"]["direction"] == "rising"
-            and r["composite_risk"] >= 50):
+            and at_least(r["composite_risk"], 50)):
         return (f"Escalate monitoring: composite risk is {r['composite_risk']:.0f}/100 and "
                 f"the rolling monitor moved {f['monthly_trend']['change']:+.1f} points over "
                 f"the last {f['monthly_trend']['change_window_months']} months "
                 f"(as of {f['monthly_trend']['latest_period']}).")
-    if f["dependency"] and f["dependency"]["dependency_pct"] >= 80 and top:
+    if f["dependency"] and at_least(f["dependency"]["dependency_pct"], 80) and top:
         return (f"Review stock cover: {f['dependency']['dependency_pct']:.0f}% "
                 f"import-dependent with {top['origin']} at {top['share']*100:.0f}% of "
                 f"supply — domestic production ({f['dependency']['production_kt']:.0f} kt) "
@@ -748,19 +756,33 @@ STRUCTURAL_NUMBERS = {0.0, 1.0, 12.0, 100.0}
 _NUM_TOKEN = re.compile(r"\d{4}-\d{2}(?!\d)|\d+(?:\.\d+)?")
 
 
-def _collect_fact_values(obj, nums: set, period_tokens: set) -> None:
+# A bare 4-digit whole number in this range is read as a YEAR and must name a
+# year the facts actually contain (see verify_grounding).
+YEAR_RANGE = (1900, 2100)
+# "Last year" / "next year" phrasing: a year may sit at most this far from a
+# fact year.
+YEAR_SLACK = 1
+
+
+def _is_year(x: float) -> bool:
+    return x.is_integer() and YEAR_RANGE[0] <= x <= YEAR_RANGE[1]
+
+
+def _collect_fact_values(obj, nums: set, period_tokens: set, years: set) -> None:
     if isinstance(obj, dict):
         for k, v in obj.items():
             if k == "hs_code":  # identifier, not a quantity — must not
                 continue        # vouch for nearby fabricated numbers
-            _collect_fact_values(v, nums, period_tokens)
+            _collect_fact_values(v, nums, period_tokens, years)
     elif isinstance(obj, (list, tuple)):
         for v in obj:
-            _collect_fact_values(v, nums, period_tokens)
+            _collect_fact_values(v, nums, period_tokens, years)
     elif isinstance(obj, bool):
         return
     elif isinstance(obj, (int, float)):
         v = float(obj)
+        if _is_year(v):
+            years.add(v)
         # The scalings the brief legitimately applies: shares → %,
         # USD → millions/billions, tonne-scale conversions.
         for scaled in (v, v * 100, v / 1e6, v / 1e9, v / 1e3):
@@ -770,19 +792,41 @@ def _collect_fact_values(obj, nums: set, period_tokens: set) -> None:
             if "-" in tok:  # 'YYYY-MM' period — keep whole, allow bare year too
                 period_tokens.add(tok)
                 nums.add(float(tok[:4]))
+                years.add(float(tok[:4]))
             else:
-                nums.add(abs(float(tok)))
+                v = abs(float(tok))
+                nums.add(v)
+                if _is_year(v):
+                    years.add(v)
 
 
 def verify_grounding(text: str, facts: dict) -> int:
-    """Every number in the brief must trace to the fact dict, within the
-    rounding the brief is allowed to apply (a token with d decimals may be
-    off by half a unit in its last decimal, or 1.5% for round-number
-    phrasing). Returns the count of numbers checked; raises ValueError
-    naming the untraceable ones otherwise — the caller falls back to the
-    deterministic template, so a fabricated number can never be displayed."""
-    nums, period_tokens = set(), set()
-    _collect_fact_values(facts, nums, period_tokens)
+    """Second-layer check that the numbers in a brief match the fact dict.
+
+    The primary guarantee is architectural: every figure is computed in
+    assemble_facts() before the model runs, and the LLM rephrases that
+    prepared material rather than deriving numbers. This check then tests
+    each number in the text against the fact dict, by token type:
+
+      - 'YYYY-MM' periods must appear in the facts exactly;
+      - years (bare 4-digit whole numbers in YEAR_RANGE) must be within
+        YEAR_SLACK of a year in the facts, unless they equal a fact value to
+        rounding precision (e.g. "$2,031M" is an amount, not a year);
+      - decimals may differ from a fact value only by rounding: half a unit
+        in their last decimal place (61.5 does not pass for 62.4);
+      - integers may be off by half a unit or 1.5%, for round-number
+        phrasing ("$900M" for 902M).
+
+    KNOWN LIMITATION (accepted, documented in tests and the architecture
+    doc): a fact dict holds dozens of values at several scalings, so an
+    invented INTEGER can coincidentally land within tolerance of some
+    unrelated fact and pass. The check is a strong filter, not a proof.
+
+    Returns the count of numbers checked; raises ValueError naming the
+    untraceable ones otherwise — the caller then falls back to the
+    deterministic template."""
+    nums, period_tokens, years = set(), set(), set()
+    _collect_fact_values(facts, nums, period_tokens, years)
     allowed = nums | STRUCTURAL_NUMBERS
     checked, untraced = 0, []
     for tok in _NUM_TOKEN.findall(text.replace(",", "")):
@@ -793,7 +837,17 @@ def verify_grounding(text: str, facts: dict) -> int:
             continue
         x = float(tok)
         decimals = len(tok.partition(".")[2])
-        tol = max(0.51 * 10 ** -decimals, 0.015 * x)
+        # Rounding-only tolerance: half a unit in the last decimal (plus a
+        # hair for binary float representation).
+        rounding = 0.5 * 10 ** -decimals + 1e-9 * max(1.0, x)
+        if decimals:
+            tol = rounding
+        elif _is_year(x):
+            if any(abs(y - x) <= YEAR_SLACK for y in years):
+                continue
+            tol = rounding
+        else:
+            tol = max(0.51, 0.015 * x)
         if not any(abs(a - x) <= tol for a in allowed):
             untraced.append(tok)
     if untraced:
@@ -805,7 +859,7 @@ def verify_grounding(text: str, facts: dict) -> int:
 
 def build_llm_brief(facts: dict) -> tuple[str, int]:
     """Claude writes the brief from the fact dict alone; the result must
-    pass verify_grounding before it is returned. Raises on any API failure
+    pass verify_grounding (the second-layer check) before it is returned. Raises on any API failure
     or grounding violation — the caller decides to fall back, never
     silently. No sampling parameters are sent (current Claude models reject
     them). Returns (text, numbers_traced)."""
