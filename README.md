@@ -107,6 +107,32 @@ dependency) alongside the raw corridor score. Approximations disclosed:
 re-exports are not netted out, and HS import headings map only roughly to
 FAO production items.
 
+## Running the tests
+
+```powershell
+pip install -r requirements.txt -r requirements-dev.txt   # test deps are dev-only
+pytest                                                    # ~15 s, fully offline
+pytest --cov=src --cov-report=term                        # with coverage
+python scripts/ci_check_dashboard.py                      # headless dashboard render
+```
+
+The suite never calls a live API and never reads the committed
+`data/qutview.db`: each test builds a small synthetic SQLite database from the
+production schema. It covers the risk model (HHI, composite weighting,
+volatility cap), the 75% mirror coverage gate, the reporting-lag ($0-drop)
+guard, alert thresholds and the materiality floor, the LLM grounding check and
+its template fallback, ingest fallback behaviour, and the PDF export.
+
+Tests marked **xfail** are known problems the suite found and deliberately
+leaves failing until they are fixed; each one states the bug in its `reason`.
+`pytest -rx` lists them. They are strict: once the bug is fixed the test passes,
+pytest reports it, and the marker must be removed.
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the tests and
+the dashboard render on every push and pull request to `master`. Because
+`master` auto-deploys to Streamlit Cloud, a red CI run means "do not trust the
+live app until fixed".
+
 ## Power BI report
 
 A three-page Power BI report ([docs/QUTVIEW.pbix](docs/QUTVIEW.pbix)) built over the same

@@ -8,3 +8,8 @@ data/raw/
 data/powerbi/
 .streamlit/secrets.toml
 .claude/
+
+# test artifacts
+.coverage
+.pytest_cache/
+htmlcov/

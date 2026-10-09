@@ -68,6 +68,13 @@ Each entry is one or two sentences, tied back to the project where it helps.
 - **Temperature** — an old LLM knob controlling output randomness (low = predictable, high = creative). Current Claude models removed it; QUTVIEW gets the same discipline a stronger way — facts-only input plus the mechanical grounding check.
 - **Fact dict** — QUTVIEW's single source of truth for a brief: one structured bundle of every number the AI is allowed to use, pulled straight from the database, with anything missing listed as a gap instead of guessed.
 - **API key / prepaid credits** — an API key is the password a program uses to call a paid service (kept in `.env`, never in git). Anthropic's API bills by usage from a prepaid credit balance — top up once, no subscription, calls just stop (and QUTVIEW falls back to template briefs) if it runs out.
+- **Automated test / test suite** — small programs that check the real code gives known answers to known inputs (e.g. "one supplier at 100% must score HHI = 1.0"). Run in seconds, every time the code changes, so a broken number is caught by a machine before a customer sees it.
+- **Synthetic fixture** — a tiny made-up dataset built just for a test ("Brazil $700M, France $100M"), so the expected answer is known exactly. QUTVIEW's tests never touch the real database or live APIs, which keeps them fast and repeatable.
+- **Regression test** — a test that pins a past fix or safeguard so it can never be quietly undone. The reporting-lag guard has one because it has caught false stories in production.
+- **Expected failure (xfail)** — a test deliberately left failing because it exposes a real bug that hasn't been fixed yet. Honest bookkeeping: the suite records the problem instead of hiding it, and flags the day it gets fixed.
+- **CI / CD (continuous integration / continuous deployment)** — CD means every change to the main branch goes live automatically (QUTVIEW's Streamlit app does). CI is the safety check that runs the tests on every change first. CD without CI = shipping untested changes straight to users.
+- **Code coverage** — the % of code lines the tests actually execute. A guide to blind spots, not a quality score: 100% coverage can still miss a wrong formula.
+- **Silent fallback / stale data** — when a data refresh fails, but the system quietly keeps (or swaps in) old data and reports success. The dashboard then shows yesterday's world as today's. QUTVIEW's tests now flag every ingest step that does this.
 
 ## Startup & business
 
