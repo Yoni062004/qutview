@@ -54,8 +54,11 @@ def mirror_extension(conn, imports: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
         "WHERE coverage_pct IS NOT NULL",
         conn,
     )
+    # imports may already carry a source column; never list it twice (a
+    # duplicate column makes the caller's pd.concat raise).
+    empty = pd.DataFrame(columns=list(dict.fromkeys([*imports.columns, "source"])))
     if mirror.empty or coverage.empty:
-        return pd.DataFrame(columns=[*imports.columns, "source"]), {}
+        return empty, {}
 
     last_uae_year = imports.groupby("commodity_id")["year"].max()
     extension, excluded = [], {}
@@ -72,7 +75,7 @@ def mirror_extension(conn, imports: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
             continue
         extension.append(extra)
     if not extension:
-        return pd.DataFrame(columns=[*imports.columns, "source"]), excluded
+        return empty, excluded
     extension = pd.concat(extension)
     extension["source"] = "mirror_derived"
     return extension, excluded
@@ -92,7 +95,8 @@ def main() -> None:
 
     imports["source"] = "uae_reported"
     extension, excluded = mirror_extension(conn, imports)
-    imports = pd.concat([imports, extension], ignore_index=True)
+    if not extension.empty:
+        imports = pd.concat([imports, extension], ignore_index=True)
 
     prices["year"] = prices["period"].str[:4].astype(int)
     prices = prices.sort_values("period")

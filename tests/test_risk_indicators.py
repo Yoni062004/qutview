@@ -7,7 +7,6 @@ volatility cap) is pinned independently of how the code computes it.
 """
 import statistics
 
-import pandas as pd
 import pytest
 
 from features import risk_indicators as ri
@@ -78,8 +77,7 @@ def test_years_and_commodities_scored_independently(db, score):
     assert s[(2022, "wheat")]["hhi"] == pytest.approx(0.5)
     assert s[(2023, "wheat")]["hhi"] == pytest.approx(1.0)
     assert s[(2023, "rice")]["hhi"] == pytest.approx(0.25)
-    assert all(r["source"] == "uae_reported"
-               for (_, cid), r in s.items() if cid != "lentils")
+    assert all(r["source"] == "uae_reported" for r in s.values())
 
 
 # --- volatility term -------------------------------------------------------
@@ -138,20 +136,16 @@ def test_composite_is_bounded_0_100(db, score):
     assert all(0 <= r["composite_risk"] <= 100 for r in s.values())
 
 
-# --- known bug -------------------------------------------------------------
+# --- regression: no usable mirror data ----------------------------------
 
 
-@pytest.mark.xfail(strict=True, raises=pd.errors.InvalidIndexError, reason=(
-    "BUG: main() sets imports['source'] before calling mirror_extension(), whose "
-    "empty-result path returns DataFrame(columns=[*imports.columns, 'source']) - "
-    "'source' twice - so pd.concat raises InvalidIndexError. Any DB with no "
-    "gate-passing mirror extension (fresh clone without a Comtrade key, or every "
-    "commodity below 75% coverage) cannot be scored at all."))
+# Was a crash: main() listed the 'source' column twice on the empty-extension
+# path and pd.concat raised InvalidIndexError (fresh clone / all below gate).
 @pytest.mark.parametrize("mirror", ["none", "all_below_gate"])
 def test_scores_with_no_mirror_extension(db, score, mirror):
     db.add_flows("fact_imports", 2023, "wheat", {"Russia": 600e6, "Canada": 400e6})
     if mirror == "all_below_gate":
         db.add_flows("fact_imports_mirror_annual", 2024, "wheat", {"Canada": 1e6})
         db.add_coverage("wheat", 2023, 10.0)
-    s = score(ballast=False)
+    s = score()
     assert s[(2023, "wheat")]["hhi"] == pytest.approx(0.52)

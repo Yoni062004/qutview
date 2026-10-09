@@ -111,17 +111,7 @@ def score(db, point_at):
     {(year, commodity_id): row-dict} from risk_scores."""
     from features import risk_indicators
 
-    def _score(ballast=True):
-        # KNOWN BUG (see test_risk_indicators.py::test_scores_with_no_mirror_
-        # extension): main() crashes when no commodity has a gate-passing mirror
-        # extension. Until that is fixed, tests that are about the arithmetic,
-        # not that path, add one passing mirror year for an otherwise-unused
-        # commodity ("lentils") so the extension frame is non-empty. Its rows
-        # appear in the result but no test asserts on them.
-        if ballast:
-            db.add_flows("fact_imports", 2018, "lentils", {"Ballast": 1.0})
-            db.add_flows("fact_imports_mirror_annual", 2019, "lentils", {"Ballast": 1.0})
-            db.add_coverage("lentils", 2018, 100.0)
+    def _score():
         point_at(risk_indicators)
         risk_indicators.main()
         conn = db.connect()

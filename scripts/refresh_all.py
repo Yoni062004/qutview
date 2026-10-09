@@ -4,15 +4,22 @@ One command keeps everything current:
 
     python scripts/refresh_all.py
 
-Order: schema -> ingests (Comtrade annual, World Bank prices, Comtrade
-mirror monthly, Comtrade mirror annual, FAOSTAT production) -> risk
-indicators (annual, monthly, dependency) -> forecasts -> Power BI CSV
-export.
+Order: schema -> ingests (Comtrade annual, World Bank prices, FAO dairy,
+FRED barley and lentils, Comtrade mirror monthly, Comtrade mirror annual,
+FAOSTAT production) -> risk indicators (annual, monthly, dependency) ->
+forecasts -> Power BI CSV export.
 
-Ingest steps are allowed to fail (an API being down just means existing
-data is kept — the ingest scripts never overwrite live data with sample
-data). Computation and export steps must succeed; the script stops and
-reports if one fails.
+Fail loudly: an ingest step that cannot refresh its source keeps the
+existing data untouched and exits non-zero. This script then carries on
+with the remaining steps (so everything that CAN refresh does), lists every
+stale step in the summary, and exits non-zero itself — a run that left any
+source stale never reports success. Computation and export steps must
+succeed; the script stops immediately if one fails.
+
+Sample data: comtrade_imports.py never writes sample data on the live path
+(only via its explicit --sample flag). worldbank_prices.py still seeds
+sample prices, but only into an EMPTY fact_prices table (fresh clone), and
+records the source as 'sample' so the dashboard badge shows it.
 
 After this finishes, the Streamlit dashboard is current immediately, and
 the Power BI report (docs/QUTVIEW.pbix) picks up the new numbers on the
@@ -61,9 +68,12 @@ def main() -> None:
     minutes = (time.time() - started) / 60
     print(f"\nDone in {minutes:.1f} min.")
     if warnings:
-        print("Ingest steps that kept existing data instead of refreshing:")
+        print(f"\nSTALE DATA — {len(warnings)} ingest step(s) kept existing data "
+              f"instead of refreshing:")
         for w in warnings:
             print(f"  - {w}")
+        sys.exit(f"\nREFRESH INCOMPLETE: {len(warnings)} source(s) not refreshed "
+                 f"(see above). Downstream scores were recomputed on partly stale data.")
     print("Streamlit is current now; open docs/QUTVIEW.pbix and hit "
           "Home -> Refresh to update the Power BI report.")
 

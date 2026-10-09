@@ -11,9 +11,11 @@ produces baseline 6-month price forecasts with honestly backtested error rates.
 **Stack:** Python 3.11 · SQLite (star schema) · pandas · statsmodels (SARIMAX) · Streamlit + Plotly
 
 **Public data sources:** UN Comtrade (UAE import flows by origin), World Bank
-Pink Sheet (monthly commodity prices). Every ingest script falls back to
-realistic sample data if an API is unavailable, and the dashboard displays a
-LIVE / SAMPLE provenance badge — the demo always runs.
+Pink Sheet (monthly commodity prices). Ingest scripts fail loudly: if a
+source can't be refreshed, existing data is left untouched and the step exits
+non-zero (`refresh_all.py` then reports the run as incomplete). Sample data is
+never written over live data — use `--sample` for an offline demo, and the
+dashboard's LIVE / SAMPLE provenance badge shows which you are looking at.
 
 ## Quick start
 

@@ -42,20 +42,6 @@ INGESTS = {
                         [("2026-01", "dairy", 140.0)]),
 }
 
-_EXIT_ZERO_ON_STALE = pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "BUG: when the fetch returns nothing but data already exists, this script "
-    "prints 'keeping N existing rows' and calls sys.exit(0) "
-    "(`sys.exit(1 if existing == 0 else 0)`). refresh_all.py only flags non-zero "
-    "steps, so the stale source is not even listed in its end-of-run warnings."))
-_SAMPLE_OVERWRITE = pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "BUG: comtrade_imports.main() treats an empty live response as 'API down' "
-    "and runs DELETE FROM fact_imports + load_sample(): live UAE import data is "
-    "replaced by synthetic sample data (5 of 13 commodities, fake country codes "
-    "1..N that collide with real M49 codes already in dim_country), and the run "
-    "exits 0. refresh_all.py's docstring promises ingest scripts never do this; "
-    "worldbank_prices.py guards against exactly this case."))
-
-
 def _seed(db, name):
     _, _, table, sql, rows = INGESTS[name]
     for code in {r[2] for r in rows if table != "fact_prices"}:
@@ -97,7 +83,7 @@ def _boom(*args, **kwargs):
 
 
 @pytest.mark.parametrize("name", [
-    pytest.param("comtrade_imports", marks=_SAMPLE_OVERWRITE),
+    "comtrade_imports",
     "comtrade_mirror_annual", "worldbank_prices",
     "fred_barley_price", "fred_lentils_price", "fao_dairy_price",
 ])
@@ -109,11 +95,11 @@ def test_empty_fetch_leaves_existing_data_untouched(db, point_at, monkeypatch, n
 
 
 @pytest.mark.parametrize("name", [
-    pytest.param("comtrade_imports", marks=_SAMPLE_OVERWRITE),
+    "comtrade_imports",
     "comtrade_mirror_annual", "worldbank_prices",
-    pytest.param("fred_barley_price", marks=_EXIT_ZERO_ON_STALE),
-    pytest.param("fred_lentils_price", marks=_EXIT_ZERO_ON_STALE),
-    pytest.param("fao_dairy_price", marks=_EXIT_ZERO_ON_STALE),
+    "fred_barley_price",
+    "fred_lentils_price",
+    "fao_dairy_price",
 ])
 def test_empty_fetch_exits_nonzero(db, point_at, monkeypatch, name):
     _seed(db, name)
@@ -131,15 +117,26 @@ def test_fetch_error_keeps_data_and_exits_nonzero(db, point_at, monkeypatch, nam
     assert _snapshot(db, table) == before
 
 
+@pytest.mark.parametrize("fetch", [_boom, _empty], ids=["error", "empty"])
 @pytest.mark.parametrize("name", ["comtrade_imports", "comtrade_mirror_annual",
                                   "worldbank_prices"])
-def test_failed_fetch_does_not_bump_provenance_timestamp(db, point_at, monkeypatch, name):
-    # data_source.loaded_at is the only durable freshness signal; a failed
-    # refresh must not make stale data look freshly loaded.
+def test_failed_fetch_does_not_touch_provenance(db, point_at, monkeypatch, name, fetch):
+    # data_source is the durable freshness/provenance signal; a failed refresh
+    # must neither make stale data look freshly loaded nor relabel it 'sample'.
     _seed(db, name)
-    _run_with_fetch(monkeypatch, point_at, name, _boom)
-    assert db.query("SELECT loaded_at FROM data_source WHERE source_name = ?",
-                    (name,)) == [("2026-01-01 00:00:00",)]
+    before = sorted(db.query("SELECT * FROM data_source"))
+    _run_with_fetch(monkeypatch, point_at, name, fetch)
+    assert sorted(db.query("SELECT * FROM data_source")) == before
+
+
+def test_comtrade_sample_only_via_explicit_flag(db, point_at, monkeypatch):
+    # The offline demo path still works — but only when asked for.
+    point_at(comtrade_imports)
+    monkeypatch.setattr(comtrade_imports, "fetch_live", _boom)  # must not be called
+    monkeypatch.setattr(sys, "argv", ["comtrade_imports.py", "--sample"])
+    comtrade_imports.main()
+    assert db.query("SELECT count(*) FROM fact_imports")[0][0] > 0
+    assert db.query("SELECT kind FROM data_source WHERE source_name = 'imports'") ==         [("sample",)]
 
 
 def test_successful_comtrade_fetch_replaces_data(db, point_at, monkeypatch):
@@ -182,17 +179,25 @@ def test_refresh_all_lists_ingest_steps_that_kept_stale_data(refresh, capsys):
     assert "src/ingest/comtrade_imports.py" in out
 
 
+def test_refresh_all_lists_every_stale_step_and_fails(refresh, capsys):
+    stale = ["src/ingest/comtrade_imports.py", "src/ingest/fred_barley_price.py",
+             "src/ingest/fred_lentils_price.py", "src/ingest/fao_dairy_price.py"]
+    code, out = refresh({s: 1 for s in stale}, capsys)
+    assert code not in (0, None)
+    assert "REFRESH INCOMPLETE: 4 source(s)" in str(code)
+    for s in stale:
+        assert f"  - {s}" in out
+    assert "  - src/ingest/worldbank_prices.py" not in out
+    # Every later step still ran: the export happened despite stale ingests.
+    assert "=== scripts/export_powerbi.py ===" in out
+
+
 def test_refresh_all_aborts_when_a_compute_step_fails(refresh, capsys):
     code, out = refresh({"src/features/risk_indicators.py": 1}, capsys)
     assert code not in (0, None)
     assert "ABORTED" in str(code)
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "GAP: refresh_all.py prints the list of ingest steps that kept stale data "
-    "but still exits 0, so the scheduled refresh (refresh_scheduled.bat / Task "
-    "Scheduler) records success. This is how a stale refresh reached production "
-    "unnoticed. Expected: finish all steps, then exit non-zero if any were stale."))
 def test_refresh_all_exits_nonzero_when_an_ingest_kept_stale_data(refresh, capsys):
     code, _ = refresh({"src/ingest/comtrade_imports.py": 1}, capsys)
     assert code not in (0, None)

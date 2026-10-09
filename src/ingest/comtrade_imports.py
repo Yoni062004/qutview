@@ -3,13 +3,14 @@
 Uses the authenticated endpoint when COMTRADE_API_KEY is configured,
 otherwise the free public preview endpoint (capped at 500 records per
 call, so we query one commodity-year at a time, with retry/backoff on
-rate limits). If the API is unreachable or returns nothing, falls back
-to realistic sample data so the rest of the pipeline always works. A
-live fetch is staged in memory and only replaces existing data once it
-succeeds, so a failed run never leaves the database half-updated.
+rate limits). A live fetch is staged in memory and only replaces existing
+data once it succeeds. If the API is unreachable or returns nothing, the
+existing data is left untouched and the script exits non-zero — sample
+data is NEVER written on the live path; it is only loaded by the explicit
+--sample offline-demo flag.
 
-Run:  python src/ingest/comtrade_imports.py               (live, with fallback)
-      python src/ingest/comtrade_imports.py --sample      (force sample data)
+Run:  python src/ingest/comtrade_imports.py               (live; fails loudly)
+      python src/ingest/comtrade_imports.py --sample      (offline demo data only)
       python src/ingest/comtrade_imports.py --names-only  (refresh country names only)
 """
 import random
@@ -30,7 +31,7 @@ PREVIEW_URL = "https://comtradeapi.un.org/public/v1/preview/C/A/HS"
 AUTH_URL = "https://comtradeapi.un.org/data/v1/get/C/A/HS"  # registered-key endpoint
 PARTNER_REF_URL = "https://comtradeapi.un.org/files/v1/app/reference/partnerAreas.json"
 
-# Realistic origin mixes used only for sample mode / fallback.
+# Realistic origin mixes used only for the explicit --sample offline demo.
 # Shares drift a little year to year via random noise.
 SAMPLE_ORIGINS = {
     "wheat":    {"Russia": 0.55, "Canada": 0.15, "India": 0.12, "Australia": 0.10, "Ukraine": 0.08},
@@ -199,18 +200,20 @@ def main() -> None:
         conn.close()
         sys.exit(1)
 
-    if rows:
-        inserted = store_rows(conn, rows)
-        named = enrich_country_names(conn)
-        record_data_source(conn, "imports", "live")
-        print(f"Loaded {inserted} live import rows from UN Comtrade "
-              f"({named} country names resolved).")
-    else:
-        print("Live API returned no data — falling back to sample data.")
-        conn.execute("DELETE FROM fact_imports")
-        inserted = load_sample(conn)
-        record_data_source(conn, "imports", "sample")
-        print(f"Loaded {inserted} sample import rows.")
+    if not rows:
+        # Never substitute sample data on the live path: an empty response is
+        # a failed refresh, and must say so rather than overwrite real data.
+        existing = conn.execute("SELECT count(*) FROM fact_imports").fetchone()[0]
+        print(f"FAILED: UN Comtrade returned no import records — keeping {existing} "
+              f"existing rows untouched (data NOT refreshed).")
+        conn.close()
+        sys.exit(1)
+
+    inserted = store_rows(conn, rows)
+    named = enrich_country_names(conn)
+    record_data_source(conn, "imports", "live")
+    print(f"Loaded {inserted} live import rows from UN Comtrade "
+          f"({named} country names resolved).")
 
     conn.commit()
     conn.close()

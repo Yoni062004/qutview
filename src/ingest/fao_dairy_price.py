@@ -126,9 +126,9 @@ def main() -> None:
     if not rows:
         existing = conn.execute(
             "SELECT count(*) FROM fact_prices WHERE commodity_id = 'dairy'").fetchone()[0]
-        print(f"Could not fetch FAO dairy index — keeping {existing} existing dairy rows.")
+        print(f"FAILED: could not fetch FAO dairy index — keeping {existing} existing dairy rows (data NOT refreshed).")
         conn.close()
-        sys.exit(1 if existing == 0 else 0)
+        sys.exit(1)
 
     inserted = store_rows(conn, rows)
     newest = max(p for p, _, _ in rows)
